@@ -2,11 +2,11 @@
 
 ## 1. Current Phase
 
-Current phase: **MVP-2 Complete**
+Current phase: **MVP-3 Complete**
 
-MVP-2 adds a Streamlit UI on top of MVP-1, supporting both in-process and HTTP backend modes via the `NATIVE_PLANNING_API_URL` env var.
+MVP-3 adds alternative plan selection, runtime source tracking (`[LLM]`/`[rule-based]` from actual execution path), LLM error surfacing, UI polish (reset button, env diagnostics), and load-dotenv robustness across all entry points.
 
-Next milestone after MVP-2: **v1** — optional SQLite persistence.
+Next milestone after MVP-3: **v1** — optional SQLite persistence.
 
 ## 2. Milestones
 
@@ -52,6 +52,21 @@ Delivered:
 
 See: `docs/handoff_mvp2.md` for the original design decisions and verification commands.
 
+### MVP-3: Alternative Plans + Source Tracking + UI Polish
+
+Status: **Complete** (2026-06-01)
+
+Delivered:
+- `UserIntent.source` field (`"llm"` / `"rule_based"` / `"unknown"`): set by `_rule_fallback()` and `_llm_to_intent()`; intent panel badge now reflects actual execution path
+- `GenerateResponse.alternatives`: up to 2 runner-up plans returned by API and in-process client
+- Streamlit plan selector: `st.radio` shown when 2+ candidates; `_run_execute` uses the selected plan
+- `_llm_parse` error surfacing: captures last exception into `UserIntent.warnings` on fallback so UI shows why LLM failed
+- `load_dotenv(_PROJECT_ROOT / ".env")` in all entry points (ui/app.py, api/app.py, cli/main.py) — key loads regardless of launch directory
+- Header env diagnostics: always shows `openai=✓/✗`, `key=✓/✗`, Python name; `st.warning` with launch command when LLM unavailable
+- 🔄 reset button (`st.columns([20, 1])`, `use_container_width=True`) at true right edge; clears all session state
+- `httpx.Client(trust_env=False)` in `HttpClient` — bypasses system proxy
+- 48 new tests; **91/91 total passing** (no external API calls required)
+
 ### v1: Persistence (Optional)
 
 Status: **Planned**
@@ -63,9 +78,8 @@ Tasks:
 
 ## 3. Current Progress
 
-MVP-0 complete. MVP-1 complete. MVP-2 complete. All 43 tests passing (33 existing + 10 new). All 5 CLI fixture scenarios still produce valid plans bit-for-bit.
+MVP-0 complete. MVP-1 complete. MVP-2 complete. MVP-3 complete. All 91 tests passing. All 5 CLI fixture scenarios still produce valid plans. Both in-process and HTTP backend modes verified.
 
 ## 4. Next Steps
 
-1. Optional MVP-3 polish: real-time tool-trace streaming, `[LLM]` badge that reflects actual code path taken (not just env var), persistent share message clipboard feedback
-2. v1 SQLite persistence (behind feature flag)
+1. v1 SQLite persistence (behind feature flag)

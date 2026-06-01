@@ -2,6 +2,25 @@
 
 All meaningful project changes should be recorded in this file.
 
+## [MVP-3] - 2026-06-01
+
+### Added
+
+- `UserIntent.source` field (`Literal["llm", "rule_based", "unknown"]`): `_rule_fallback()` sets `"rule_based"`, `_llm_to_intent()` sets `"llm"`; intent panel badge in `_render_intent_panel` now reflects actual runtime path, not just env-var presence
+- `GenerateResponse.alternatives: list[ItineraryPlan]`: up to 2 runner-up plans returned by both `InProcessClient` and `HttpClient`; `src/api/app.py` also returns `alternatives=ranked[1:3]`
+- Plan selector `st.radio` in `src/ui/app.py`: shown when 2+ candidates; `_run_execute` receives the selected plan, not always the best plan
+- Header env diagnostics: `openai=✓/✗`, `key=✓/✗`, Python name always visible in caption; `st.warning` with exact launch command shown when LLM unavailable
+- 🔄 reset button at true page right edge via `st.columns([20, 1])` + `use_container_width=True`; clears `last_generate`, `last_execute`, `selected_plan_idx`
+- 48 new tests (intent parser source field, UI client alternatives, API alternatives shape, trust_env flag); **91/91 total**
+
+### Fixed
+
+- `_llm_parse` now captures the last exception into `UserIntent.warnings` on fallback, so `_render_warnings` surfaces the actual API error in the UI instead of silently showing `[rule-based]`
+- `load_dotenv(_PROJECT_ROOT / ".env")` in all three entry points (`src/ui/app.py`, `src/api/app.py`, `src/cli/main.py`) — `.env` is found regardless of working directory; fixes HTTP mode where uvicorn launched from a different directory failed to pick up `OPENAI_API_KEY`
+- `httpx.Client(trust_env=False)` in `HttpClient.generate()` and `.execute()` — bypasses system HTTP proxy (was causing 502 errors)
+- `ShareMessage.receiver_type` Literal extended with `"partner"` and `"colleague_group"` — was causing 500 errors for couple / colleague scenarios
+- `build_family_timeline` accepts `target_total_minutes` — inflates venue duration to match requested `duration_hours`; fixes 8h request producing 3.5h timeline
+
 ## [MVP-2 patch] - 2026-05-31
 
 ### Fixed

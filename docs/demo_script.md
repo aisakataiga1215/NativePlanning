@@ -7,7 +7,7 @@
 echo %NATIVE_PLANNING_API_URL%   # Windows — 应为空
 echo $NATIVE_PLANNING_API_URL    # macOS/Linux — 应为空
 
-# 如已设置，清除它
+# 如已设置，清除它（Windows：设置为空字符串，UI 的 if url: 判断等价于未设置）
 set NATIVE_PLANNING_API_URL=     # Windows
 unset NATIVE_PLANNING_API_URL    # macOS/Linux
 ```
