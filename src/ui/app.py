@@ -94,7 +94,19 @@ def _render_header() -> None:
         "本地生活活动规划助理 · 输入需求 → 生成计划 → 确认执行 · "
         "点击「重新开始」清空当前计划"
     )
+    try:
+        import openai as _oa  # noqa: F401
+        _openai_ok = True
+    except ImportError:
+        _openai_ok = False
+    _key_ok = bool(os.getenv("OPENAI_API_KEY"))
     st.caption(f"后端：{_backend_mode_label()}  ·  意图解析：{_intent_source_badge()}")
+    if not _openai_ok or not _key_ok:
+        st.caption(
+            f"⚠ LLM 不可用 — openai={'已安装' if _openai_ok else '未安装'}，"
+            f"OPENAI_API_KEY={'已设置' if _key_ok else '未设置'}，"
+            f"Python: `{sys.executable}`"
+        )
 
 
 def _render_intent_panel(generate: GenerateResponse) -> None:
@@ -248,15 +260,15 @@ def main() -> None:
     )
     st.session_state["user_input"] = user_input
 
-    btn_col, _, reset_col = st.columns([3, 5, 1])
-    with btn_col:
+    col_gen, col_rst = st.columns([20, 1])
+    with col_gen:
         generate_clicked = st.button(
             "生成计划",
             type="primary",
             disabled=not user_input.strip(),
         )
-    with reset_col:
-        if st.button("🔄", help="重新开始"):
+    with col_rst:
+        if st.button("🔄", help="重新开始", use_container_width=True):
             for key in ("last_generate", "last_execute", "selected_plan_idx"):
                 st.session_state.pop(key, None)
             st.rerun()
