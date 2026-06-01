@@ -12,6 +12,11 @@ from __future__ import annotations
 
 import io
 import sys
+from pathlib import Path
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
 from dotenv import load_dotenv
 from rich.console import Console
@@ -19,7 +24,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich import box
 
-load_dotenv()
+load_dotenv(_PROJECT_ROOT / ".env")
 
 from src.tools.wrappers import TraceLog
 from src.workflow.intent_parser import parse_intent, parse_free_text

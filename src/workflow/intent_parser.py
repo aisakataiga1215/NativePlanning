@@ -175,6 +175,7 @@ def _llm_parse(user_input: str, client) -> UserIntent:
         {"role": "system", "content": _SYSTEM_PROMPT},
         {"role": "user", "content": user_input},
     ]
+    _last_exc: Exception | None = None
 
     # ── 1. Structured Outputs (preferred) ────────────────────────────────────
     try:
@@ -187,8 +188,8 @@ def _llm_parse(user_input: str, client) -> UserIntent:
         parsed = response.choices[0].message.parsed
         if parsed is not None:
             return _llm_to_intent(parsed, user_input)
-    except Exception:
-        pass
+    except Exception as exc:
+        _last_exc = exc
 
     # ── 2. json_object mode ───────────────────────────────────────────────────
     try:
@@ -203,11 +204,18 @@ def _llm_parse(user_input: str, client) -> UserIntent:
         allowed = set(UserIntentLLM.model_fields)
         llm = UserIntentLLM(**{k: v for k, v in data.items() if k in allowed})
         return _llm_to_intent(llm, user_input)
-    except Exception:
-        pass
+    except Exception as exc:
+        _last_exc = exc
 
-    # ── 3. Rule-based fallback ────────────────────────────────────────────────
-    return _rule_fallback(user_input)
+    # ── 3. Rule-based fallback — record why LLM failed ───────────────────────
+    result = _rule_fallback(user_input)
+    if _last_exc is not None:
+        result = result.model_copy(update={
+            "warnings": list(result.warnings) + [
+                f"LLM 调用失败，已降级到规则解析：{type(_last_exc).__name__}: {_last_exc}"
+            ]
+        })
+    return result
 
 
 def _classify_age_group(age: int) -> str:

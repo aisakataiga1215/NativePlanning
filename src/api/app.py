@@ -7,10 +7,16 @@ Endpoints:
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
 from src.api.schemas import (
     ExecuteRequest,
@@ -26,7 +32,7 @@ from src.workflow.intent_parser import parse_free_text
 from src.workflow.message_agent import generate_share_message
 from src.workflow.planner import generate_candidate_plans
 
-load_dotenv()
+load_dotenv(_PROJECT_ROOT / ".env")
 
 app = FastAPI(title="NativePlanning API", version="0.1.0")
 

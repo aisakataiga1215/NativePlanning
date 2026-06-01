@@ -13,6 +13,7 @@ A two-step confirm flow stores the generated plan in `st.session_state`:
 1. User enters Chinese text → 生成计划 → plan + traces displayed.
 2. User clicks 确认并执行 → execution results + share message displayed.
 """
+
 from __future__ import annotations
 
 import os
@@ -25,7 +26,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(_PROJECT_ROOT / ".env")
 
 import streamlit as st
 
@@ -92,20 +93,27 @@ def _render_header() -> None:
     st.title("🗺️ NativePlanning")
     st.caption(
         "本地生活活动规划助理 · 输入需求 → 生成计划 → 确认执行 · "
-        "点击「重新开始」清空当前计划"
+        "点击 🔄 清空当前计划"
     )
     try:
         import openai as _oa  # noqa: F401
+
         _openai_ok = True
     except ImportError:
         _openai_ok = False
     _key_ok = bool(os.getenv("OPENAI_API_KEY"))
-    st.caption(f"后端：{_backend_mode_label()}  ·  意图解析：{_intent_source_badge()}")
+    st.caption(
+        f"后端：{_backend_mode_label()}  ·  意图解析：{_intent_source_badge()}  ·  "
+        f"openai={'✓' if _openai_ok else '✗'}  ·  "
+        f"key={'✓' if _key_ok else '✗'}  ·  "
+        f"Python: `{Path(sys.executable).name}`"
+    )
     if not _openai_ok or not _key_ok:
-        st.caption(
-            f"⚠ LLM 不可用 — openai={'已安装' if _openai_ok else '未安装'}，"
-            f"OPENAI_API_KEY={'已设置' if _key_ok else '未设置'}，"
-            f"Python: `{sys.executable}`"
+        st.warning(
+            f"LLM 不可用 — openai={'已安装' if _openai_ok else '**未安装**'}，"
+            f"OPENAI_API_KEY={'已设置' if _key_ok else '**未设置**'}。  \n"
+            f"请用 conda env 启动：`E:/miniforge/envs/agent/Scripts/streamlit.exe run src/ui/app.py`  \n"
+            f"完整路径：`{sys.executable}`"
         )
 
 
@@ -203,15 +211,11 @@ def _render_execution(execute: ExecuteResponse) -> None:
             rows = []
             for result in execute.results:
                 ref = result.booking_id or result.order_id or ""
-                detail = (
-                    f"{result.message}  ({ref})" if ref else result.message
-                )
+                detail = f"{result.message}  ({ref})" if ref else result.message
                 rows.append(
                     {
                         "操作": result.action_type,
-                        "状态": "✓ 成功"
-                        if result.status == "success"
-                        else "✗ 失败",
+                        "状态": "✓ 成功" if result.status == "success" else "✗ 失败",
                         "详情": detail,
                     }
                 )
