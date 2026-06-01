@@ -73,8 +73,10 @@ export NATIVE_PLANNING_API_URL=http://localhost:8000
 streamlit run src/ui/app.py
 ```
 
-The UI shows intent panel, plan card (5-dim score), timeline, collapsible tool traces,
-two-step confirm flow, execution results with booking IDs, and a copy-ready share message.
+The UI shows intent panel (with `[LLM]` / `[rule-based]` source badge), plan card
+(5-dim score), alternative plan selector (up to 3 candidates), timeline, collapsible
+tool traces, two-step confirm flow, execution results with booking IDs, copy-ready
+share message, and a 🔄 reset button.
 
 See [`docs/demo_script.md`](docs/demo_script.md) for the full judge demo walkthrough.
 
@@ -84,7 +86,7 @@ See [`docs/demo_script.md`](docs/demo_script.md) for the full judge demo walkthr
 
 ```bash
 pytest tests/ -v
-# 43 passed in ~1 s — no OPENAI_API_KEY required
+# 91 passed in ~1 s — no OPENAI_API_KEY required
 ```
 
 ---
@@ -114,6 +116,7 @@ See [`docs/architecture.md`](docs/architecture.md) for details.
 | MVP-0 | ✓ Complete | Deterministic CLI, 5 scenarios, 18 tests |
 | MVP-1 | ✓ Complete | LLM intent parser (OpenAI-compatible) + FastAPI app |
 | MVP-2 | ✓ Complete | Streamlit UI, dual backend mode, 43/43 tests in <1 s |
+| MVP-3 | ✓ Complete | Alternative plans selector, source tracking, UI polish, 91 tests |
 | v1 | Planned | Optional SQLite persistence |
 
 ---
@@ -131,6 +134,6 @@ src/
 ├── ui/           # Streamlit app + PlanningClient
 └── workflow/     # intent_parser, planner, constraint_solver,
                   # executor, message_agent
-tests/            # 43 tests, no external API calls
+tests/            # 91 tests, no external API calls
 docs/             # architecture, changelog, demo_script, project_status
 ```
