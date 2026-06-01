@@ -248,7 +248,7 @@ def main() -> None:
     )
     st.session_state["user_input"] = user_input
 
-    btn_col, reset_col = st.columns([4, 1])
+    btn_col, _, reset_col = st.columns([3, 5, 1])
     with btn_col:
         generate_clicked = st.button(
             "生成计划",
@@ -256,7 +256,7 @@ def main() -> None:
             disabled=not user_input.strip(),
         )
     with reset_col:
-        if st.button("重新开始"):
+        if st.button("🔄", help="重新开始"):
             for key in ("last_generate", "last_execute", "selected_plan_idx"):
                 st.session_state.pop(key, None)
             st.rerun()
