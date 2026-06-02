@@ -9,6 +9,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.schemas.coupon_package import Package, RestaurantCoupon
+
 
 class Restaurant(BaseModel):
     """A dining option associated with (typically near) a venue.
@@ -59,6 +61,10 @@ class Restaurant(BaseModel):
         ge=0,
         description="Estimated walk-in queue length in minutes.",
     )
+    noise_level: Literal["quiet", "moderate", "loud"] = Field(
+        default="moderate",
+        description="Ambient noise level: 'quiet', 'moderate', or 'loud'.",
+    )
     reservation_available: bool = Field(
         ...,
         description="Whether reservations can be made through the mock API.",
@@ -79,6 +85,61 @@ class Restaurant(BaseModel):
     available_slots: list[str] = Field(
         ...,
         description="Reservable time slots in HH:MM format, e.g. ['17:00', '17:30'].",
+    )
+
+    # --- MVP-4: duration range ---
+    suggested_meal_duration_min: int = Field(
+        default=60,
+        ge=0,
+        description="Minimum sensible meal duration in minutes.",
+    )
+    suggested_meal_duration_max: int = Field(
+        default=90,
+        ge=0,
+        description="Maximum sensible meal duration in minutes.",
+    )
+
+    # --- MVP-4: rich review data ---
+    review_count: int = Field(
+        default=0,
+        ge=0,
+        description="Number of user reviews on the platform.",
+    )
+    positive_review_tags: list[str] = Field(
+        default_factory=list,
+        description="Top positive review tags, e.g. ['出品稳定', '服务好', '环境安静'].",
+    )
+    negative_review_tags: list[str] = Field(
+        default_factory=list,
+        description="Top negative review tags, e.g. ['节假日排队长', '停车不便'].",
+    )
+    recommended_dishes: list[str] = Field(
+        default_factory=list,
+        description="Signature / frequently-ordered dishes, e.g. ['招牌牛肉面', '秘制红烧肉'].",
+    )
+    specialty_tags: list[str] = Field(
+        default_factory=list,
+        description="Marketing highlight tags, e.g. ['网红打卡', '情侣首选'].",
+    )
+
+    # --- MVP-4: area / location ---
+    area: str = Field(
+        default="",
+        description="District or landmark area this restaurant belongs to.",
+    )
+    nearby_areas: list[str] = Field(
+        default_factory=list,
+        description="Adjacent areas that this restaurant is considered near.",
+    )
+
+    # --- MVP-4: promotions ---
+    packages: list[Package] = Field(
+        default_factory=list,
+        description="Bundled meal deals, e.g. double set meal.",
+    )
+    restaurant_coupons: list[RestaurantCoupon] = Field(
+        default_factory=list,
+        description="Discount coupons available for this restaurant.",
     )
 
 

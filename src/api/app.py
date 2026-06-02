@@ -23,6 +23,7 @@ from src.api.schemas import (
     ExecuteResponse,
     GenerateRequest,
     GenerateResponse,
+    ReviseRequest,
 )
 from src.services.plan_ranker import rank_plans
 from src.tools.wrappers import ToolTrace, TraceLog
@@ -30,7 +31,8 @@ from src.workflow.constraint_solver import validate_and_repair
 from src.workflow.executor import execute_plan
 from src.workflow.intent_parser import parse_free_text
 from src.workflow.message_agent import generate_share_message
-from src.workflow.planner import generate_candidate_plans
+from src.workflow.planner import generate_plans, revise_restaurant_only, revise_venue_only
+from src.workflow.revision_parser import apply_revision
 
 load_dotenv(_PROJECT_ROOT / ".env")
 
@@ -68,13 +70,15 @@ def _trace_to_dict(trace: ToolTrace) -> dict:
 async def generate(request: GenerateRequest) -> GenerateResponse:
     log = TraceLog()
     intent = parse_free_text(request.user_input)
-    plans = generate_candidate_plans(intent, log)
+    plans = generate_plans(intent, log)
     repaired = [validate_and_repair(p, intent, log) for p in plans]
     ranked = rank_plans(
         repaired, intent.max_distance_km, intent.duration_hours,
         participants=intent.participants or None,
         requested_activities=intent.requested_activities or None,
         hard_constraints=intent.hard_constraints or None,
+        location_anchor=intent.location_anchor,
+        requested_meals=intent.requested_meals or None,
     )
     best = ranked[0]
     return GenerateResponse(
@@ -101,3 +105,33 @@ async def execute(request: ExecuteRequest) -> ExecuteResponse:
 @app.get("/api/health")
 async def health() -> dict:
     return {"status": "ok"}
+
+
+@app.post("/api/plans/revise", response_model=GenerateResponse)
+async def revise(request: ReviseRequest) -> GenerateResponse:
+    log = TraceLog()
+    updated_intent = apply_revision(request.intent, request.revision_text, request.current_plan)
+    scope = updated_intent.revision_scope
+    if scope == "restaurant_only" and request.current_plan:
+        plans = revise_restaurant_only(updated_intent, request.current_plan, log)
+    elif scope == "venue_only" and request.current_plan:
+        plans = revise_venue_only(updated_intent, request.current_plan, log)
+    else:
+        plans = generate_plans(updated_intent, log)
+    repaired = [validate_and_repair(p, updated_intent, log) for p in plans]
+    ranked = rank_plans(
+        repaired, updated_intent.max_distance_km, updated_intent.duration_hours,
+        participants=updated_intent.participants or None,
+        requested_activities=updated_intent.requested_activities or None,
+        hard_constraints=updated_intent.hard_constraints or None,
+        location_anchor=updated_intent.location_anchor,
+        requested_meals=updated_intent.requested_meals or None,
+    )
+    best = ranked[0]
+    return GenerateResponse(
+        plan=best,
+        alternatives=ranked[1:3],
+        intent=updated_intent,
+        traces=[_trace_to_dict(t) for t in log.traces],
+        warnings=best.warnings,
+    )

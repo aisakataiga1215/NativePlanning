@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from src.schemas.plan import ItineraryPlan, ScoreBreakdown
 from src.schemas.user_intent import Participant
+from src.services.opening_hours import is_open_during
 
 _WEIGHTS = {
     "distance_score": 0.25,
@@ -18,6 +19,32 @@ _AGE_GROUP_WEIGHTS: dict[str, float] = {
 _AGE_GROUP_MIDPOINTS: dict[str, int] = {
     "young_child": 3, "child": 9, "teenager": 15,
     "young_adult": 21, "adult": 40, "senior": 70, "unknown": 30,
+}
+
+MEAL_TAG_TO_DISH_KEYWORDS: dict[str, list[str]] = {
+    "japanese": ["寿司", "刺身", "拉面", "鳗鱼", "天妇罗"],
+    "hotpot":   ["火锅", "毛肚", "肥牛", "虾滑"],
+    "bbq":      ["烤肉", "五花肉", "牛肉", "烤串"],
+    "coffee":   ["咖啡", "拿铁", "甜点"],
+    "western":  ["牛排", "意面", "披萨"],
+}
+
+_ACTIVITY_TYPE_MAP: dict[str, list[str]] = {
+    "zoo":             ["zoo"],
+    "theme_park":      ["theme_park"],
+    "night_market":    ["night_market"],
+    "mall":            ["mall", "indoor_kids_playground"],
+    "exhibition":      ["museum", "art_center"],
+    "museum":          ["museum"],
+    "movie":           ["movie"],
+    "board_game":      ["board_game"],
+    "escape_room":     ["escape_room"],
+    "park_walk":       ["park", "park_walk"],
+    "kids_playground": ["indoor_kids_playground", "kids_playground"],
+    "citywalk":        ["citywalk", "shopping_street"],
+    "tea_house":       ["tea_house"],
+    "climbing":        ["climbing"],
+    "cycling":         ["cycling"],
 }
 
 
@@ -47,6 +74,10 @@ def score_plan(
     participants: list[Participant] | None = None,
     requested_activities: list[str] | None = None,
     hard_constraints: list[str] | None = None,
+    location_anchor: str = "",
+    requested_meals: list[str] | None = None,
+    activity_start_time: str = "",
+    activity_end_time: str = "",
 ) -> ItineraryPlan:
     from src.mock_api.venues import get_venue
     from src.mock_api.restaurants import get_restaurant
@@ -99,8 +130,13 @@ def score_plan(
     # Priority 1: explicit_request bonus — also neutralizes participant_fit penalty
     explicit_bonus = 0.0
     if requested_activities and venue:
+        venue_types_mapped = {
+            vtype
+            for ra in requested_activities
+            for vtype in _ACTIVITY_TYPE_MAP.get(ra, [ra])
+        }
         venue_identifiers = set(venue.tags) | {venue.type}
-        if any(ra in venue_identifiers for ra in requested_activities):
+        if venue_identifiers & (venue_types_mapped | set(requested_activities)):
             group_fit_score = max(group_fit_score, 0.6)  # honor explicit > participant_fit
             explicit_bonus = 0.15
 
@@ -109,8 +145,87 @@ def score_plan(
     if hard_constraints and venue:
         if "avoid_long_walk" in hard_constraints and not venue.indoor and venue.distance_km > 3:
             constraint_penalty += 0.1
+        if "avoid_long_walk" in hard_constraints and hasattr(venue, "walk_intensity") and venue.walk_intensity == "high":
+            constraint_penalty += 0.2
         if "avoid_long_queue" in hard_constraints and any("queue" in r.lower() for r in plan.risks):
             constraint_penalty += 0.1
+        if "avoid_long_queue" in hard_constraints and restaurant and hasattr(restaurant, "queue_minutes") and restaurant.queue_minutes > 20:
+            constraint_penalty += 0.15
+        if "indoor" in hard_constraints and not venue.indoor:
+            constraint_penalty += 0.3
+    # negative_review_tags × hard_constraints penalty
+    if hard_constraints and restaurant:
+        if "avoid_long_queue" in hard_constraints:
+            if any("排队" in t for t in restaurant.negative_review_tags):
+                constraint_penalty += 0.05
+
+    # senior / quiet preference penalties
+    has_senior = any(p.age_group == "senior" for p in (participants or []))
+    if has_senior:
+        if venue and hasattr(venue, "noise_level") and venue.noise_level == "loud":
+            constraint_penalty += 0.15
+        if restaurant and hasattr(restaurant, "noise_level") and restaurant.noise_level == "loud":
+            constraint_penalty += 0.10
+
+    # colleagues: prefer quiet/moderate
+    if plan.scenario_type == "colleagues":
+        if venue and hasattr(venue, "noise_level") and venue.noise_level == "loud":
+            constraint_penalty += 0.10
+
+    # opening hours penalty: primary venue must be open for the full activity step
+    # If explicit activity_start/end times were supplied, use them; otherwise derive
+    # from this plan's own primary activity step (related_entity_id == primary venue).
+    if venue:
+        oh_start = activity_start_time
+        oh_end = activity_end_time
+        if not (oh_start and oh_end):
+            primary_step = next(
+                (
+                    s for s in plan.steps
+                    if s.step_type == "activity" and s.related_entity_id == plan.venue_id
+                ),
+                None,
+            )
+            if primary_step is not None:
+                oh_start = primary_step.start_time
+                oh_end = primary_step.end_time
+        if oh_start and oh_end:
+            if not is_open_during(
+                venue.open_time, venue.close_time,
+                oh_start, oh_end,
+            ):
+                constraint_penalty += 0.35
+
+    # location_anchor bonus
+    anchor_bonus = 0.0
+    if location_anchor:
+        anchor = location_anchor.lower()
+        if venue and (anchor in venue.area.lower()
+                      or any(anchor in a.lower() for a in venue.nearby_areas)):
+            anchor_bonus += 0.15
+        if restaurant and (anchor in restaurant.area.lower()
+                           or any(anchor in a.lower() for a in restaurant.nearby_areas)):
+            anchor_bonus += 0.10
+
+    # promo_bonus: coupon or package present
+    promo_bonus = 0.0
+    if venue and (venue.venue_coupons or venue.packages):
+        promo_bonus += 0.05
+    if restaurant and (restaurant.restaurant_coupons or restaurant.packages):
+        promo_bonus += 0.05
+
+    # dishes_bonus: requested_meals × recommended_dishes keyword match
+    dishes_bonus = 0.0
+    if requested_meals and restaurant:
+        dish_text = " ".join(restaurant.recommended_dishes)
+        tag_match = any(meal in restaurant.tags for meal in requested_meals)
+        keyword_match = any(
+            kw in dish_text
+            for meal in requested_meals
+            for kw in MEAL_TAG_TO_DISH_KEYWORDS.get(meal, [])
+        )
+        if tag_match or keyword_match:
+            dishes_bonus += 0.10
 
     breakdown = ScoreBreakdown(
         distance_score=round(distance_score, 3),
@@ -119,11 +234,14 @@ def score_plan(
         restaurant_score=round(restaurant_score, 3),
         execution_score=round(execution_score, 3),
     )
-    aggregate = (
+    aggregate = max(0.0, min(1.0,
         sum(getattr(breakdown, k) * w for k, w in _WEIGHTS.items())
         + explicit_bonus
+        + anchor_bonus
+        + promo_bonus
+        + dishes_bonus
         - constraint_penalty
-    )
+    ))
 
     return plan.model_copy(update={
         "score": round(aggregate, 3),
@@ -138,9 +256,18 @@ def rank_plans(
     participants: list[Participant] | None = None,
     requested_activities: list[str] | None = None,
     hard_constraints: list[str] | None = None,
+    location_anchor: str = "",
+    requested_meals: list[str] | None = None,
+    activity_start_time: str = "",
+    activity_end_time: str = "",
 ) -> list[ItineraryPlan]:
     scored = [
-        score_plan(p, max_distance_km, duration_hours, participants, requested_activities, hard_constraints)
+        score_plan(
+            p, max_distance_km, duration_hours,
+            participants, requested_activities, hard_constraints,
+            location_anchor, requested_meals,
+            activity_start_time, activity_end_time,
+        )
         for p in plans
     ]
     return sorted(scored, key=lambda p: -p.score)

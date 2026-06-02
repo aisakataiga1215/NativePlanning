@@ -2,13 +2,47 @@
 
 ## 1. Current Phase
 
-Current phase: **MVP-3 Complete**
+Current phase: **MVP-4.5 Complete**
 
-MVP-3 adds alternative plan selection, runtime source tracking (`[LLM]`/`[rule-based]` from actual execution path), LLM error surfacing, UI polish (reset button, env diagnostics), and load-dotenv robustness across all entry points.
+MVP-4.5 adds five horizontal enhancements on top of MVP-4: natural-language date/time parsing, opening-hours filtering with ranker penalty, ticket-type schemas and UI, revision scope (partial re-plan for restaurant-only or venue-only changes), and UI completeness (intent panel, timeline icons, venue/restaurant hours cards).
 
-Next milestone after MVP-3: **v1** — optional SQLite persistence.
+Next milestone: **MVP-5** (TBD).
 
 ## 2. Milestones
+
+### MVP-4.5: Time-Aware Planning + Opening Hours + Revision Scope + UI Completeness
+
+Status: **Complete** (2026-06-02)
+
+Delivered:
+- `src/workflow/datetime_parser.py`: `parse_date_time(text, now=None)` resolves 今天/明天/周X/N号/早上/晚上/待会 to `DateTimeResult(date, weekday, time_period, start_time)`
+- `UserIntent` new fields: `weekday`, `time_period`, `revision_scope` (all with defaults)
+- `src/services/opening_hours.py`: `is_open_at`, `is_open_during` (midnight-crossing), `opening_hours_warning`
+- Opening-hours warning in planner + −0.35 penalty in ranker when venue closed during activity
+- `revision_scope` in `apply_revision()`: cleared each call; `restaurant_only` / `venue_only` scope dispatch in API + InProcessClient
+- `revise_restaurant_only` / `revise_venue_only` in planner
+- `TicketOption` schema + `Venue.ticket_options` field
+- Activity-type boost in `generate_plans()` + `_ACTIVITY_TYPE_MAP` in ranker
+- New intent_parser rules: 动物园/夜市/烛光晚餐 keywords
+- Mock data: 5 new venues (venue_014–018), 4 new restaurants (rest_013–016)
+- UI: compact intent panel + debug expander, timeline icons + 营业 status column, venue/restaurant hours + ticket cards, multi-stop display
+- 72 new tests; **216/216 total** (1 skipped)
+
+### MVP-4: Rich Data + Multi-stop + Location Anchor
+
+Status: **Complete** (2026-06-02)
+
+Delivered:
+- `src/schemas/coupon_package.py`: Package, VenueCoupon, RestaurantCoupon Pydantic schemas
+- All 12 venues + 12 restaurants enriched with area, review_count, tags, coupons, packages, duration ranges
+- venue_013 (超级主题乐园, theme_park, min 240 min) added for large-venue constraint testing
+- `build_dynamic_timeline()` in itinerary_builder: budget-residual driven, guarantees total <= duration_hours × 60
+- `generate_plans()` as new main entry point (multi-stop capable); `generate_candidate_plans()` preserved
+- `UserIntent.location_anchor` + `_extract_location_anchor()` in intent_parser
+- `apply_revision()` updated with anchor update/clear rules (Rule 18)
+- 4 new ranking dimensions in plan_ranker (anchor_bonus, promo_bonus, dishes_bonus, negative_review penalty)
+- UI shows specialty_tags, coupons, packages, recommended_dishes, review_count, area column, location_anchor badge
+- 23 new tests; **136/136 total**
 
 ### MVP-0: Minimum Runnable Closed Loop
 
@@ -67,9 +101,36 @@ Delivered:
 - `httpx.Client(trust_env=False)` in `HttpClient` — bypasses system proxy
 - 48 new tests; **91/91 total passing** (no external API calls required)
 
-### v1: Persistence (Optional)
+### MVP-3.5: Plan Revision Loop + Mock Data Expansion
+
+Status: **Complete** (2026-06-02)
+
+Delivered:
+- Plan revision loop: "太远了" / "换个餐厅" / "想吃日料" updates intent and re-runs pipeline before execution
+- `src/workflow/revision_parser.py`: 17-rule keyword table; `apply_revision()` returns new UserIntent via `model_copy`
+- `POST /api/plans/revise` endpoint; `revise()` on both InProcessClient and HttpClient
+- Mock data: 6 → 12 venues (board_game, tea_house, citywalk, escape_room, movie, kids_lab); 6 → 12 restaurants
+- New schema fields on Venue (`walk_intensity`, `noise_level`, `queue_minutes`) and Restaurant (`noise_level`)
+- `UserIntent.avoid_venue_ids` / `.avoid_restaurant_ids`: planner filters these before candidate generation
+- Field-aware ranking penalties (walk intensity, queue time, noise level, indoor constraint)
+- Streamlit revision UI: `st.form` input; hidden after execution; radio pre-selection fixed; cost breakdown with item detail
+- Bug fix: default plan start time 10:00 (was 00:00 from LLM omission)
+- 22 new tests; **113/113 total passing**
+
+See: `docs/handoff_mvp4.md` for design decisions, known limitations, and MVP-4 proposals.
+
+### MVP-4: Rich Local-Life Data + Multi-stop Itinerary + Location Anchor
 
 Status: **Planned**
+
+Tasks:
+- Rich local-life data: business hours, rating, `specialty_tags` (网红/情侣/亲子); time-of-day availability
+- Multi-stop itinerary: 2–3 activity stops + 1–2 meal stops chained by time; `PlanStep.travel_minutes`; constraint solver validates full chain continuity
+- Location anchor: `UserIntent.location_anchor`; mock venues with lat/lon; Haversine distance filter; distance-from-anchor in timeline
+
+### v1: SQLite Persistence (Deferred)
+
+Status: **Deferred**
 
 Tasks:
 - Add SQLite via SQLAlchemy (behind feature flag)
@@ -78,8 +139,10 @@ Tasks:
 
 ## 3. Current Progress
 
-MVP-0 complete. MVP-1 complete. MVP-2 complete. MVP-3 complete. All 91 tests passing. All 5 CLI fixture scenarios still produce valid plans. Both in-process and HTTP backend modes verified.
+MVP-0 through MVP-4.5 complete. All 216 tests passing (1 skipped). All 5 CLI fixture scenarios produce valid plans. Both in-process and HTTP backend modes verified. Plan revision loop with scope dispatch tested end-to-end in Streamlit.
+
+Documentation: `docs/data_simulation.md` (mock data strategy), `docs/handoff_mvp4.md` (MVP-3.5/4 design decisions), `docs/changelog.md` (full change history).
 
 ## 4. Next Steps
 
-1. v1 SQLite persistence (behind feature flag)
+1. MVP-5 (TBD): Real API integration, SQLite persistence, or additional planning scenarios.

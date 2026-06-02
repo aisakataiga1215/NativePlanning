@@ -2,10 +2,89 @@
 
 All meaningful project changes should be recorded in this file.
 
+## [MVP-4.5] - 2026-06-02
+
+### Added
+
+- **Date/Time Parsing** (`src/workflow/datetime_parser.py`, new): `parse_date_time(text, now=None) → DateTimeResult` resolves natural-language date/time expressions — 今天/明天/后天/大后天, 周X/周末, N号, 早上/中午/下午/傍晚/晚上/待会 — to a concrete `date` (YYYY-MM-DD), `weekday` (周一…周日), `time_period`, and `start_time` (HH:MM). Injectable `now` for test determinism. 26 unit tests.
+- **UserIntent new fields** (all with defaults, `extra="forbid"` preserved): `weekday: str = ""`, `time_period: str = ""`, `revision_scope: str = ""`. `parse_free_text()` gains `_now` injection; all paths end with a `parse_date_time` post-processing step that overwrites `date`/`weekday`/`time_period`/`time`.
+- **Opening Hours Service** (`src/services/opening_hours.py`, new): `is_open_at`, `is_open_during` (full step containment, midnight-crossing via ±1440 offset), `opening_hours_warning`. 25 unit + integration tests.
+- **Opening Hours in Planner**: `_build_one_plan` checks primary-venue activity step against `venue.open_time/close_time`; out-of-hours venues get a `plan.warnings` entry (plan still generated so ranker can deprioritize).
+- **Opening Hours Penalty in Ranker**: `score_plan` / `rank_plans` gain optional `activity_start_time` / `activity_end_time` params; −0.35 `constraint_penalty` when venue is closed during the activity.
+- **Revision Scope** (`revision_scope` in `UserIntent`): `apply_revision()` clears scope at the start of every call (prevents cross-revision pollution), then sets `"restaurant_only"` for meal-related rules and `"venue_only"` for activity-related rules. Global constraint rules (距离/预算/排队/天气) leave scope empty.
+- **Partial Re-plan functions**: `revise_restaurant_only(intent, current_plan, log)` preserves `venue_ids`, re-searches only restaurant; `revise_venue_only(intent, current_plan, log)` preserves `restaurant_id`, re-searches only venues. Both fall back to `generate_plans` when mock data yields no results.
+- **Scope Dispatch** in `POST /api/plans/revise` and `InProcessClient.revise()`: `restaurant_only` → `revise_restaurant_only`; `venue_only` → `revise_venue_only`; else → `generate_plans`.
+- **TicketOption schema** (`src/schemas/coupon_package.py`): `type: Literal["adult","student","senior","child","family"]`, `price`, `note`, `available`.
+- **Venue ticket_options field**: `Venue.ticket_options: list[TicketOption] = []`.
+- **Activity-type boost in Planner**: `generate_plans()` reorders venues so those whose `type` matches `intent.requested_activities` (via `_ACTIVITY_TYPE_MAP`) move to the front — ensuring e.g. "动物园" request surfaces a zoo-type venue even if its raw rating ranks it lower.
+- **Activity-type map in Ranker** (`_ACTIVITY_TYPE_MAP`): maps requested activity keywords (zoo, theme_park, mall, exhibition, movie, board_game, …) to venue `type` values for `explicit_bonus`.
+- **New keyword rules in `intent_parser.py`**: "动物园"→zoo, "主题乐园"→theme_park, "夜市"→night_market, "商场"→mall in `requested_activities`; "烛光晚餐"/"浪漫晚餐"→western in `requested_meals` + romantic/candlelight in `soft_preferences`.
+- **Mock data expansion** (Phase 6): 5 new venues (venue_014 城郊动物园 zoo 09:00–17:30, venue_015 夜市美食集市, venue_016 星河购物中心, venue_017 城市音乐现场, venue_018 商场亲子乐园 10:00–22:00); 4 new restaurants (rest_013 烛光西餐厅, rest_014 清晨面包坊, rest_015 深夜拉面馆 18:00–02:00 midnight-crossing, rest_016 动物园亲子餐厅).
+- **UI improvements** (`src/ui/app.py`):
+  - Intent panel: compact 4-metric layout + `📅 date weekday · time_period` + `💰 budget label`; `st.expander("🔍 调试信息")` shows full `intent.model_dump()`.
+  - Timeline: step-type icons (🚗/🎯/🍽/🏠), `营业` column (🟢/🔴 via `is_open_during`), `step.notes` displayed inline.
+  - Venue card: `🕐 open_time – close_time`, `⏱ min–max 分钟`, ticket_options list with notes.
+  - Restaurant card: `🕐 open_time – close_time`, `⏳ 排队约 N 分钟`.
+  - Multi-stop: extra venues in `plan.venue_ids` shown with name + rating + hours + specialty_tags.
+- **Test expansion**: 18 `test_revision_scope.py`, 25 `test_opening_hours.py`, 26 `test_datetime_parser.py`, 4 new tests in `test_intent_parser_rules.py`; **216/216 total** (1 skipped).
+
+### Changed
+
+- `parse_free_text()` signature: optional `_now: datetime | None = None` (production path uses `datetime.now()`; only tests inject a fixed value).
+- `score_plan()` / `rank_plans()` signature: new optional `activity_start_time: str = ""`, `activity_end_time: str = ""`.
+- `generate_plans()` now reorders venue candidates to prioritize `requested_activities` type matches before taking top 3.
+
+
+
+### Added
+
+- **Dynamic Multi-stop Itinerary**: `generate_plans()` replaces `generate_candidate_plans()` as the main API/UI entry point. Plans are driven by a time-budget residual (`remaining_minutes`), not a hard half-day/full-day template. Light stops (tea/citywalk) are inserted when remaining >= 40 min; secondary activities when remaining >= 90 min and `duration_type == "full_day"` (>= 7 h).
+- `build_dynamic_timeline()` in `src/services/itinerary_builder.py`: dynamic timeline builder that guarantees `total_duration_minutes <= intent.duration_hours × 60` via budget-priority duration clamping (activity durations and meal duration are compressed below their suggested minimums when the budget requires it).
+- `get_duration_type(duration_hours) -> Literal["half_day", "full_day"]` pure helper in `src/workflow/planner.py`.
+- **Location Anchor**: `UserIntent.location_anchor` and `anchor_place` fields; `_extract_location_anchor()` in `src/workflow/intent_parser.py` detects patterns like "先去芳华街", "云景附近", "离公司近"; `UserIntentLLM.location_anchor` field + system prompt rule; `apply_revision()` updated with anchor update/clear rules.
+- **Rich Mock Data**: all 12 venues and 12 restaurants enriched with `area`, `nearby_areas`, `review_count`, `positive_review_tags`, `negative_review_tags`, `specialty_tags`, `packages`, `venue_coupons`/`restaurant_coupons`, `suggested_duration_min/max`, `duration_flexibility`, `suggested_meal_duration_min/max`, `recommended_dishes`. New venue_013 (超级主题乐园, theme_park, min 240 min, flexibility="low") for testing large-venue scenarios.
+- `src/schemas/coupon_package.py` (new): `Package`, `VenueCoupon`, `RestaurantCoupon` Pydantic models with `extra="forbid"`.
+- **New Ranking Dimensions** in `src/services/plan_ranker.py` (all with default args for backward compatibility):
+  - `anchor_bonus`: +0.15 (venue in anchor area), +0.10 (restaurant in anchor area)
+  - `promo_bonus`: +0.05 per entity with coupons or packages
+  - `dishes_bonus`: +0.10 via `MEAL_TAG_TO_DISH_KEYWORDS` (English tag → Chinese dish keyword mapping)
+  - `negative_review_tags × hard_constraints` penalty: −0.05 when "avoid_long_queue" and restaurant negative tags contain "排队"
+  - Score clamped to [0.0, 1.0] to prevent bonus stacking from exceeding 1.
+- **UI Enhancements** in `src/ui/app.py`: venue specialty_tags + venue_coupons, restaurant rating with review_count, recommended_dishes, positive/negative_review_tags, restaurant_coupons, packages; intent panel shows `location_anchor` badge; timeline table adds "区域" column from `step.area`.
+- 23 new tests (`test_multistop_planner.py` × 12, `test_location_anchor.py` × 11); **136/136 total**.
+
+### Changed
+
+- `src/api/app.py` and `src/ui/planning_client.py`: both `generate` and `revise` endpoints now call `generate_plans()` (multi-stop capable) and forward `location_anchor` + `requested_meals` to `rank_plans()`.
+- `estimate_travel_minutes()`: minimum raised from 10 min to 15 min (fixes unrealistic 1–2 min travel estimates); cross-area trips use ×1.3 congestion factor.
+- `build_family_timeline()` and `generate_candidate_plans()` preserved unchanged for backward compatibility with existing tests.
+
+
+
+### Added
+
+- **Plan Revision Loop**: user types "太远了" / "换个餐厅" / "想吃日料" (etc.) after seeing a plan and clicks "调整方案" — `apply_revision()` updates the intent and re-runs the full pipeline before execution
+- `src/workflow/revision_parser.py` (new): 17-rule keyword table covering distance, budget, queue, fatigue, indoor/outdoor, 6 activity types, 6 meal types, "换个场地/餐厅" with avoid-ID tracking
+- `POST /api/plans/revise` FastAPI endpoint + `ReviseRequest` schema; wired into both `InProcessClient.revise()` and `HttpClient.revise()`
+- Streamlit revision UI: `st.form` input + "调整方案" button shown between trace expander and execute button; hidden once execution is confirmed
+- Mock data expanded 6 → 12 venues (board_game, tea_house, citywalk, escape_room, movie, kids_lab) and 6 → 12 restaurants; all entries now include `walk_intensity`, `noise_level`, `queue_minutes`
+- New schema fields: `Venue.walk_intensity`, `Venue.noise_level`, `Venue.queue_minutes`; `Restaurant.noise_level`; `UserIntent.avoid_venue_ids`, `UserIntent.avoid_restaurant_ids`
+- Field-aware ranking penalties: `walk_intensity=="high"` → −0.20; `restaurant.queue_minutes>20` → −0.15; senior+loud → −0.15/−0.10; `"indoor"` constraint+outdoor venue → −0.30; colleagues+loud → −0.10
+- Planner filters `avoid_venue_ids` / `avoid_restaurant_ids` from search results before candidate generation
+- 22 new tests (`test_revision_parser.py` × 19 unit, `test_revision_integration.py` × 3 integration); **113/113 total**
+
+### Fixed
+
+- Default plan start time was `00:00` when LLM did not mention time — added "未提及时间 → time='10:00'" to system prompt; changed `UserIntentLLM.time` default to `"10:00"`; rule-based fallback also defaults to `"10:00"` instead of `"14:00"`
+- Streamlit revision form: `clear_on_submit=True` caused `text_input` to return `""` in the same rerun as `form_submit_button` returned `True`, silently skipping the revision call — removed `clear_on_submit`
+- Radio plan selector not pre-selected after revision: changed `st.session_state.pop("selected_plan_idx")` to explicit `st.session_state["selected_plan_idx"] = 0`
+- Plan card cost section now shows itemized breakdown (🎟 门票, 🍽 餐饮, 💰 合计) with hover tooltips; distance metric shows actual km instead of distance score
+
 ## [MVP-3] - 2026-06-01
 
 ### Added
 
+- `docs/data_simulation.md`: judge-facing Chinese document explaining the mock data strategy — why MockAPI is used (no real APIs from the competition), data coverage (12 venues / 12 restaurants / 4 coupons), scenario matrix (family / couple / friends / colleagues / elderly), exception fixtures (no-seats / no-tickets / time-conflict), and the value MockAPI brings to demo stability, reproducibility, tool trace, and fallback演示. Cross-links to `mock_api_design.md`, `architecture.md`, and `planning_strategy.md` to avoid duplication
 - `UserIntent.source` field (`Literal["llm", "rule_based", "unknown"]`): `_rule_fallback()` sets `"rule_based"`, `_llm_to_intent()` sets `"llm"`; intent panel badge in `_render_intent_panel` now reflects actual runtime path, not just env-var presence
 - `GenerateResponse.alternatives: list[ItineraryPlan]`: up to 2 runner-up plans returned by both `InProcessClient` and `HttpClient`; `src/api/app.py` also returns `alternatives=ranked[1:3]`
 - Plan selector `st.radio` in `src/ui/app.py`: shown when 2+ candidates; `_run_execute` receives the selected plan, not always the best plan

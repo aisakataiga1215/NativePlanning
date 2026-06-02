@@ -89,6 +89,18 @@ class UserIntent(BaseModel):
         default="today",
         description="Target date, e.g. 'today' or 'YYYY-MM-DD'.",
     )
+    weekday: str = Field(
+        default="",
+        description="周一…周日，由 datetime_parser 填写",
+    )
+    time_period: str = Field(
+        default="",
+        description="morning|noon|afternoon|evening|night|soon|unknown",
+    )
+    revision_scope: str = Field(
+        default="",
+        description="restaurant_only|venue_only|''",
+    )
     time: str = Field(
         default="14:00",
         description="Target start time in HH:MM 24-hour format.",
@@ -121,7 +133,7 @@ class UserIntent(BaseModel):
     )
     requested_places: list[str] = Field(
         default_factory=list,
-        description="Specific places explicitly named: '三里屯', '湖边公园', etc.",
+        description="Specific places explicitly named: '芳华街', '湖边公园', etc.",
     )
     place_preferences: list[str] = Field(
         default_factory=list,
@@ -158,4 +170,22 @@ class UserIntent(BaseModel):
     source: Literal["llm", "rule_based", "unknown"] = Field(
         default="unknown",
         description="Which code path produced this intent: 'llm', 'rule_based', or 'unknown'.",
+    )
+    avoid_venue_ids: list[str] = Field(
+        default_factory=list,
+        description="Venue IDs to exclude from planning (e.g. after 'change venue' revision).",
+    )
+    avoid_restaurant_ids: list[str] = Field(
+        default_factory=list,
+        description="Restaurant IDs to exclude from planning (e.g. after 'change restaurant' revision).",
+    )
+
+    # --- MVP-4: location anchor ---
+    location_anchor: str = Field(
+        default="",
+        description="User-specified area anchor for the outing, e.g. '芳华街', '云景', '公司附近'.",
+    )
+    anchor_place: str = Field(
+        default="",
+        description="Specific place name within the anchor area, e.g. '芳华街 SOHO'.",
     )

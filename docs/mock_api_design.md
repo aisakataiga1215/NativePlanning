@@ -64,8 +64,8 @@ Example:
   "id": "venue_family_001",
   "name": "云朵亲子乐园",
   "category": "indoor_playground",
-  "location": "望京",
-  "address": "望京中心商场 3 层",
+  "location": "云景",
+  "address": "云景中心商场 3 层",
   "distance_km": 3.2,
   "duration_minutes": 90,
   "tags": ["child_friendly", "indoor", "family", "low_burden"],
@@ -89,8 +89,8 @@ Example:
   "id": "rest_family_001",
   "name": "轻食研究所",
   "category": "healthy_food",
-  "location": "望京",
-  "address": "望京 SOHO B1",
+  "location": "云景",
+  "address": "云景 SOHO B1",
   "distance_km": 3.8,
   "tags": ["healthy", "low_calorie", "child_friendly", "low_queue"],
   "suitable_for": ["family"],
@@ -170,7 +170,7 @@ Response:
       "id": "venue_family_001",
       "name": "云朵亲子乐园",
       "category": "indoor_playground",
-      "location": "望京",
+      "location": "云景",
       "distance_km": 3.2,
       "duration_minutes": 90,
       "tags": ["child_friendly", "indoor", "family"],
@@ -254,7 +254,7 @@ group_size: number
 Example:
 
 ```txt
-GET /mock/restaurants/search?scenario_type=family&tags=healthy,low_calorie&near_location=望京&group_size=3
+GET /mock/restaurants/search?scenario_type=family&tags=healthy,low_calorie&near_location=云景&group_size=3
 ```
 
 Response:
@@ -266,7 +266,7 @@ Response:
       "id": "rest_family_001",
       "name": "轻食研究所",
       "category": "healthy_food",
-      "location": "望京",
+      "location": "云景",
       "distance_km": 3.8,
       "avg_price": 85,
       "tags": ["healthy", "low_calorie", "child_friendly"],

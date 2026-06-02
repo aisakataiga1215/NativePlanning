@@ -55,6 +55,17 @@ class PlanStep(BaseModel):
         description="ID of the venue, restaurant, or coupon backing this step.",
     )
 
+    # --- MVP-4 ---
+    travel_minutes: int = Field(
+        default=0,
+        ge=0,
+        description="Minutes needed to travel from this step to the next one.",
+    )
+    area: str = Field(
+        default="",
+        description="District/area where this step takes place, e.g. '芳华街'.",
+    )
+
 
 class ScoreBreakdown(BaseModel):
     """Per-dimension scores used by the plan ranker.
@@ -156,4 +167,15 @@ class ItineraryPlan(BaseModel):
     restaurant_id: Optional[str] = Field(
         default=None,
         description="Primary restaurant for this plan, when applicable.",
+    )
+
+    # --- MVP-4: multi-stop ---
+    venue_ids: list[str] = Field(
+        default_factory=list,
+        description="All activity venue IDs in the plan (multi-stop plans have 2+).",
+    )
+    stop_count: int = Field(
+        default=1,
+        ge=1,
+        description="Number of non-travel steps (activities + meals).",
     )

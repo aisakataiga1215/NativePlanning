@@ -5,7 +5,11 @@ gardens, and similar local-life points of interest. Returned by the mock POI
 search tool and consumed by the planner.
 """
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
+
+from src.schemas.coupon_package import Package, TicketOption, VenueCoupon
 
 
 class Venue(BaseModel):
@@ -80,3 +84,75 @@ class Venue(BaseModel):
         ge=0,
         description="Number of tickets currently available; 0 triggers the no-tickets failure.",
     )
+    walk_intensity: Literal["low", "medium", "high"] = Field(
+        default="medium",
+        description="Physical walking demand: 'low' (seated/indoor), 'medium', 'high' (heavy hiking).",
+    )
+    noise_level: Literal["quiet", "moderate", "loud"] = Field(
+        default="moderate",
+        description="Ambient noise level: 'quiet', 'moderate', or 'loud'.",
+    )
+    queue_minutes: int = Field(
+        default=0,
+        ge=0,
+        description="Estimated entry queue length in minutes.",
+    )
+
+    # --- MVP-4: duration range ---
+    suggested_duration_min: int = Field(
+        default=60,
+        ge=0,
+        description="Minimum sensible visit duration in minutes.",
+    )
+    suggested_duration_max: int = Field(
+        default=120,
+        ge=0,
+        description="Maximum sensible visit duration in minutes.",
+    )
+    duration_flexibility: Literal["low", "medium", "high"] = Field(
+        default="medium",
+        description=(
+            "'low' = fixed-duration (movie/escape_room/theme_park); "
+            "'medium' = adjustable ±30 min; 'high' = very flexible (park/citywalk)."
+        ),
+    )
+
+    # --- MVP-4: rich review data ---
+    review_count: int = Field(
+        default=0,
+        ge=0,
+        description="Number of user reviews on the platform.",
+    )
+    positive_review_tags: list[str] = Field(
+        default_factory=list,
+        description="Top positive review tags, e.g. ['环境好', '适合亲子', '性价比高'].",
+    )
+    negative_review_tags: list[str] = Field(
+        default_factory=list,
+        description="Top negative review tags, e.g. ['节假日排队长', '停车困难'].",
+    )
+    specialty_tags: list[str] = Field(
+        default_factory=list,
+        description="Marketing highlight tags, e.g. ['网红打卡', '亲子推荐', '情侣首选'].",
+    )
+
+    # --- MVP-4: area / location ---
+    area: str = Field(
+        default="",
+        description="District or landmark area this venue belongs to, e.g. '芳华街', '云景'.",
+    )
+    nearby_areas: list[str] = Field(
+        default_factory=list,
+        description="Adjacent areas that this venue is considered part of.",
+    )
+
+    # --- MVP-4: promotions ---
+    packages: list[Package] = Field(
+        default_factory=list,
+        description="Bundled deals available for this venue (e.g. family ticket).",
+    )
+    venue_coupons: list[VenueCoupon] = Field(
+        default_factory=list,
+        description="Discount coupons available for this venue.",
+    )
+    ticket_options: list[TicketOption] = Field(default_factory=list)

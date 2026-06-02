@@ -36,7 +36,7 @@ def test_rule_fallback_friends_keyword(monkeypatch):
 def test_rule_fallback_morning_time(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     result = parse_free_text("上午想出去逛逛")
-    assert result.time == "10:00"
+    assert result.time == "09:00"  # datetime_parser: 上午 → morning → 09:00
 
 
 @patch("src.workflow.intent_parser._make_client")

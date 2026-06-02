@@ -29,7 +29,8 @@ from src.workflow.constraint_solver import validate_and_repair
 from src.workflow.executor import execute_plan
 from src.workflow.intent_parser import parse_free_text
 from src.workflow.message_agent import generate_share_message
-from src.workflow.planner import generate_candidate_plans
+from src.workflow.planner import generate_plans, revise_restaurant_only, revise_venue_only
+from src.workflow.revision_parser import apply_revision
 
 _DEFAULT_HTTP_TIMEOUT_SECONDS = 30.0
 
@@ -43,6 +44,11 @@ class PlanningClient(Protocol):
         self, plan: ItineraryPlan, intent: UserIntent
     ) -> ExecuteResponse: ...
 
+    def revise(
+        self, revision_text: str, intent: UserIntent,
+        current_plan: ItineraryPlan | None = None,
+    ) -> GenerateResponse: ...
+
 
 class InProcessClient:
     """Run the workflow in-process (same modules the CLI imports)."""
@@ -50,13 +56,15 @@ class InProcessClient:
     def generate(self, user_input: str) -> GenerateResponse:
         log = TraceLog()
         intent = parse_free_text(user_input)
-        plans = generate_candidate_plans(intent, log)
+        plans = generate_plans(intent, log)
         repaired = [validate_and_repair(p, intent, log) for p in plans]
         ranked = rank_plans(
             repaired, intent.max_distance_km, intent.duration_hours,
             participants=intent.participants or None,
             requested_activities=intent.requested_activities or None,
             hard_constraints=intent.hard_constraints or None,
+            location_anchor=intent.location_anchor,
+            requested_meals=intent.requested_meals or None,
         )
         best = ranked[0]
         return GenerateResponse(
@@ -77,6 +85,37 @@ class InProcessClient:
             results=results,
             share_message=msg,
             traces=[_trace_to_dict(t) for t in log.traces],
+        )
+
+    def revise(
+        self, revision_text: str, intent: UserIntent,
+        current_plan: ItineraryPlan | None = None,
+    ) -> GenerateResponse:
+        log = TraceLog()
+        updated_intent = apply_revision(intent, revision_text, current_plan)
+        scope = updated_intent.revision_scope
+        if scope == "restaurant_only" and current_plan:
+            plans = revise_restaurant_only(updated_intent, current_plan, log)
+        elif scope == "venue_only" and current_plan:
+            plans = revise_venue_only(updated_intent, current_plan, log)
+        else:
+            plans = generate_plans(updated_intent, log)
+        repaired = [validate_and_repair(p, updated_intent, log) for p in plans]
+        ranked = rank_plans(
+            repaired, updated_intent.max_distance_km, updated_intent.duration_hours,
+            participants=updated_intent.participants or None,
+            requested_activities=updated_intent.requested_activities or None,
+            hard_constraints=updated_intent.hard_constraints or None,
+            location_anchor=updated_intent.location_anchor,
+            requested_meals=updated_intent.requested_meals or None,
+        )
+        best = ranked[0]
+        return GenerateResponse(
+            plan=best,
+            alternatives=ranked[1:3],
+            intent=updated_intent,
+            traces=[_trace_to_dict(t) for t in log.traces],
+            warnings=best.warnings,
         )
 
 
@@ -112,6 +151,23 @@ class HttpClient:
             )
             response.raise_for_status()
             return ExecuteResponse.model_validate(response.json())
+
+    def revise(
+        self, revision_text: str, intent: UserIntent,
+        current_plan: ItineraryPlan | None = None,
+    ) -> GenerateResponse:
+        payload = {
+            "revision_text": revision_text,
+            "intent": intent.model_dump(),
+            "current_plan": current_plan.model_dump() if current_plan else None,
+        }
+        with httpx.Client(timeout=self.timeout, trust_env=False) as client:
+            response = client.post(
+                f"{self.base_url}/api/plans/revise",
+                json=payload,
+            )
+            response.raise_for_status()
+            return GenerateResponse.model_validate(response.json())
 
 
 def make_client() -> PlanningClient:

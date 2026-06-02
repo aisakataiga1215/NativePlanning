@@ -1,5 +1,11 @@
 # CLAUDE.md
 
+## 0. Environment
+
+- Python: `E:\miniforge\envs\agent\python.exe`
+- Run tests: `E:\miniforge\envs\agent\python.exe -m pytest tests/ -q`
+- Run Streamlit: `E:\miniforge\envs\agent\Scripts\streamlit.exe run src/ui/app.py`
+
 ## 1. Project Goal
 
 This project is a competition demo for a local life planning and execution agent.

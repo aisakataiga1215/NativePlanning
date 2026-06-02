@@ -29,3 +29,9 @@ class ExecuteResponse(BaseModel):
     results: list[ExecutionResult]
     share_message: ShareMessage
     traces: list[dict]
+
+
+class ReviseRequest(BaseModel):
+    revision_text: str
+    intent: UserIntent
+    current_plan: ItineraryPlan | None = None

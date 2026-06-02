@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from datetime import datetime
 from typing import Literal, Optional
 
 from pydantic import BaseModel, ValidationError
@@ -43,6 +44,9 @@ _ACTIVITY_REQUEST_MAP: dict[str, str] = {
     "逛街":    "citywalk",
     "骑行":    "cycling",
     "骑车":    "cycling",
+    "动物园":  "zoo",
+    "主题乐园": "theme_park",
+    "夜市":    "night_market",
 }
 
 _MEAL_REQUEST_MAP: dict[str, str] = {
@@ -56,6 +60,22 @@ _MEAL_REQUEST_MAP: dict[str, str] = {
     "轻食":    "healthy_food",
     "减肥":    "healthy_food",
     "健康饮食": "healthy_food",
+    "烛光晚餐": "western",
+    "浪漫晚餐": "western",
+}
+
+# ── Location anchor keywords ───────────────────────────────────────────────────
+
+_ANCHOR_AREA_MAP: dict[str, str] = {
+    "芳华街": "芳华街",
+    "云景":   "云景",
+    "明湖":   "明湖区",
+    "学海村": "明湖区",
+    "古城区":   "古城区",
+    "东河区":   "东河区",
+    "公司":   "公司附近",
+    "商场":   "商场附近",
+    "市中心": "市中心",
 }
 
 # ── Distance thresholds ────────────────────────────────────────────────────────
@@ -85,7 +105,8 @@ _SYSTEM_PROMPT = """你是本地生活活动规划助理。从用户消息中提
   "max_distance_km": 最远距离（千米），
   "activity_preferences": ["标签1", "标签2"],
   "meal_preferences": ["标签1", "标签2"],
-  "budget_preference": "low" | "medium" | "high"
+  "budget_preference": "low" | "medium" | "high",
+  "location_anchor": "用户指定的起点/活动区域，如'芳华街'、'云景'，无则空字符串"
 }
 
 规则：
@@ -94,12 +115,17 @@ _SYSTEM_PROMPT = """你是本地生活活动规划助理。从用户消息中提
 - 朋友/同学/聚会 → scenario_type="friends"
 - 同事/团建/公司 → scenario_type="colleagues"
 - "下午" → time="14:00"，"傍晚"/"晚上" → time="17:00"，"上午"/"早上" → time="10:00"
+- 未提及时间 → time="10:00"
 - "一整天"/"全天" → duration_hours=8.0，"半天" → duration_hours=4.0
 - "离家近"/"附近"/"别太远" → max_distance_km=6.0
 - "稍微远"/"远一点" → max_distance_km=10.0
 - "不限"/"很远" → max_distance_km=20.0
 - 未提及距离 → max_distance_km=6.0
-- 未提及时长 → duration_hours=5.0"""
+- 未提及时长 → duration_hours=5.0
+- "先去XX"/"XX附近"/"去XX" → location_anchor="XX"（具体地区名）
+- 无位置锚点 → location_anchor=""
+- "time_period": "morning|afternoon|evening|night|soon|unknown（时段，未提及→unknown）"
+"""
 
 
 class UserIntentLLM(BaseModel):
@@ -107,12 +133,14 @@ class UserIntentLLM(BaseModel):
 
     scenario_type: Literal["solo", "couple", "family", "friends", "colleagues", "unknown"] = "unknown"
     group_size: int = 2
-    time: str = "14:00"
+    time: str = "10:00"
     duration_hours: float = 5.0
     max_distance_km: float = 6.0
     activity_preferences: list[str] = []
     meal_preferences: list[str] = []
     budget_preference: Literal["low", "medium", "high"] = "medium"
+    location_anchor: str = ""
+    time_period: str = ""
 
 
 def _make_client():
@@ -163,6 +191,7 @@ def _llm_to_intent(llm: UserIntentLLM, raw_input: str) -> UserIntent:
         meal_preferences=list(llm.meal_preferences),
         soft_preferences=soft_prefs,
         budget_preference=llm.budget_preference,
+        location_anchor=llm.location_anchor,
         raw_input=raw_input,
         source="llm",
     )
@@ -297,7 +326,27 @@ def _extract_requests(text: str) -> tuple[list[str], list[str], list[str]]:
     for kw, tag in _MEAL_REQUEST_MAP.items():
         if kw in text and tag not in req_meals:
             req_meals.append(tag)
+    if "商场" in text and "乐园" not in text:
+        if "mall" not in req_acts:
+            req_acts.append("mall")
     return req_acts, req_meals, req_places
+
+
+def _extract_location_anchor(text: str) -> str:
+    """Extract location anchor from text.
+
+    Matches '先去芳华街', '芳华街附近', '去芳华街', '离公司近', etc.
+    Returns "" when no anchor is detected.
+    """
+    for keyword, area in _ANCHOR_AREA_MAP.items():
+        if not area:
+            continue
+        if (f"先去{keyword}" in text
+                or f"{keyword}附近" in text
+                or f"去{keyword}" in text
+                or f"离{keyword}近" in text):
+            return area
+    return ""
 
 
 def _rule_fallback(user_input: str) -> UserIntent:
@@ -345,6 +394,10 @@ def _rule_fallback(user_input: str) -> UserIntent:
         hard_constraints += ["avoid_long_walk", "avoid_long_queue"]
     if has_colleagues:
         soft_prefs += ["business_casual", "not_too_private"]
+    if any(k in text for k in ("烛光晚餐", "浪漫晚餐")):
+        for pref in ("romantic", "candlelight"):
+            if pref not in soft_prefs:
+                soft_prefs.append(pref)
 
     if "kids_playground" in req_acts and not has_child:
         warnings.append("该活动通常更适合儿童家庭，已按您的明确要求保留。")
@@ -352,7 +405,8 @@ def _rule_fallback(user_input: str) -> UserIntent:
     # Time
     if any(k in text for k in ("上午", "早上")):    start_time = "10:00"
     elif any(k in text for k in ("傍晚", "晚上")):  start_time = "17:00"
-    else:                                            start_time = "14:00"
+    elif any(k in text for k in ("下午",)):         start_time = "14:00"
+    else:                                            start_time = "10:00"
 
     # Distance (NEAR checked before FAR to avoid "别太远" matching "远")
     if any(k in text for k in _NEAR_KEYWORDS):             max_km = 6.0
@@ -378,6 +432,7 @@ def _rule_fallback(user_input: str) -> UserIntent:
         warnings=warnings,
         participants=participants,
         budget_preference="medium",
+        location_anchor=_extract_location_anchor(text),
         raw_input=user_input,
         source="rule_based",
     )
@@ -491,17 +546,25 @@ def parse_intent(scenario_key: str, raw_input: str | None = None) -> UserIntent:
     return intent
 
 
-def parse_free_text(user_input: str) -> UserIntent:
+def parse_free_text(user_input: str, _now: datetime | None = None) -> UserIntent:
     """Parse free-form Chinese text into UserIntent.
 
     Priority: fixture lookup → Structured Outputs → json_object → rule-based.
+    _now is injectable for testing; production callers omit it.
     """
+    from src.workflow.datetime_parser import parse_date_time
+
     stripped = user_input.strip()
     if stripped in _SCENARIOS:
         return _SCENARIOS[stripped]
 
     client = _make_client()
-    if client:
-        return _llm_parse(user_input, client)
+    intent = _llm_parse(user_input, client) if client else _rule_fallback(user_input)
 
-    return _rule_fallback(user_input)
+    dt = parse_date_time(user_input, now=_now)
+    return intent.model_copy(update={
+        "date": dt.date,
+        "weekday": dt.weekday,
+        "time_period": dt.time_period,
+        "time": dt.start_time,
+    })
