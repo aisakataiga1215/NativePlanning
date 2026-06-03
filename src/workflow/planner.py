@@ -129,13 +129,13 @@ def generate_plans(intent: UserIntent, log: TraceLog) -> list[ItineraryPlan]:
     tags = (
         list(intent.requested_activities)
         + list(intent.activity_preferences or [])
-        + list(intent.soft_preferences)
     ) or []
 
+    effective_radius = intent.max_distance_km * 2.5 if intent.requested_activities else intent.max_distance_km
     venues = traced_call(
         "search_venues", mock.search_venues, log,
         scenario_type=intent.scenario_type,
-        max_distance_km=intent.max_distance_km,
+        max_distance_km=effective_radius,
         tags=tags,
     )
 
@@ -143,7 +143,7 @@ def generate_plans(intent: UserIntent, log: TraceLog) -> list[ItineraryPlan]:
         venues = traced_call(
             "search_venues_fallback", mock.search_venues, log,
             scenario_type=intent.scenario_type,
-            max_distance_km=intent.max_distance_km * 1.5,
+            max_distance_km=effective_radius * 1.5,
             tags=[],
         )
 
@@ -160,6 +160,18 @@ def generate_plans(intent: UserIntent, log: TraceLog) -> list[ItineraryPlan]:
         matching = [v for v in venues if v.type in target_types]
         non_matching = [v for v in venues if v.type not in target_types]
         venues = matching + non_matching
+
+    # Boost venues that have nearby restaurants matching requested_meals
+    if intent.requested_meals:
+        meal_tags = set(intent.requested_meals)
+        def _has_meal_match(venue_id: str) -> bool:
+            return any(
+                r.near_location == venue_id and any(t in r.tags for t in meal_tags)
+                for r in mock.RESTAURANTS
+            )
+        matching_m = [v for v in venues if _has_meal_match(v.id)]
+        non_matching_m = [v for v in venues if not _has_meal_match(v.id)]
+        venues = matching_m + non_matching_m
 
     plans: list[ItineraryPlan] = []
     for primary_venue in venues[:3]:
@@ -185,11 +197,12 @@ def _build_one_plan(
     return_est = estimate_travel_minutes(primary_venue.distance_km)
 
     # search restaurants near primary venue
+    meal_prefs = list(intent.requested_meals or []) + list(intent.meal_preferences or [])
     restaurants = traced_call(
         "search_restaurants", mock.search_restaurants, log,
         near_location=primary_venue.id,
         group_size=intent.group_size,
-        preferences=intent.meal_preferences or [],
+        preferences=meal_prefs,
     )
     restaurants = [r for r in restaurants if r.id not in intent.avoid_restaurant_ids]
     if not restaurants:
@@ -231,6 +244,13 @@ def _build_one_plan(
                 venue_slots.append(VenueSlot(venue=second, role="secondary"))
                 remaining -= (sec_dur + sec_travel)
 
+    # --- add lunch for full_day plans ---
+    insert_meal_after_first = False
+    if duration_type == "full_day" and len(restaurants) >= 2:
+        lunch_restaurant = restaurants[1]
+        restaurant_slots.insert(0, RestaurantSlot(restaurant=lunch_restaurant, role="light_meal"))
+        insert_meal_after_first = True
+
     # --- build timeline ---
     raw_steps = build_dynamic_timeline(
         start_time=intent.time,
@@ -238,6 +258,7 @@ def _build_one_plan(
         restaurant_slots=restaurant_slots,
         target_total_minutes=target_minutes,
         home_to_first_km=venue_slots[0].venue.distance_km,
+        insert_meal_after_first=insert_meal_after_first,
     )
     steps = [PlanStep(**s) for s in raw_steps]
     total_min = sum(s.duration_minutes for s in steps)
@@ -247,9 +268,14 @@ def _build_one_plan(
 
     all_venue_ids = [vs.venue.id for vs in venue_slots]
     venue_names = " → ".join(vs.venue.name for vs in venue_slots)
+    if insert_meal_after_first and len(restaurant_slots) >= 2:
+        lunch_r = restaurant_slots[0].restaurant
+        plan_title = f"{venue_names} + {lunch_r.name} & {primary_restaurant.name}"
+        plan_summary = f"{intent.time} 出发，{venue_names}，午餐 {lunch_r.name}，晚餐 {primary_restaurant.name}"
+    else:
+        plan_title = f"{venue_names} + {primary_restaurant.name}"
+        plan_summary = f"{intent.time} 出发，{venue_names}，之后在 {primary_restaurant.name} 用餐"
     reasons = [f"{primary_venue.name} 评分 {primary_venue.rating}，适合{_group_label(intent.scenario_type)}"]
-    if len(venue_slots) > 1:
-        reasons.append(f"多站点行程：{venue_names}")
     risks: list[str] = []
     if primary_restaurant.queue_minutes >= 30:
         risks.append(f"{primary_restaurant.name} 排队约 {primary_restaurant.queue_minutes} 分钟，建议提前预约")
@@ -259,9 +285,9 @@ def _build_one_plan(
     plan_id = f"plan_{'_'.join(all_venue_ids)}_{primary_restaurant.id}"
     plan = ItineraryPlan(
         id=plan_id,
-        title=f"{venue_names} + {primary_restaurant.name}",
+        title=plan_title,
         scenario_type=intent.scenario_type,
-        summary=f"{intent.time} 出发，{venue_names}，之后在 {primary_restaurant.name} 用餐",
+        summary=plan_summary,
         steps=steps,
         estimated_total_cost=round(cost, 0),
         total_duration_minutes=total_min,
@@ -365,48 +391,51 @@ def revise_restaurant_only(
     if not restaurants:
         return generate_plans(intent, log)
 
-    restaurant = restaurants[0]
     venue_slots = [VenueSlot(venue=v, role="primary") for v in venues]
-    restaurant_slots = [RestaurantSlot(restaurant=restaurant, role="meal")]
-
-    raw_steps = build_dynamic_timeline(
-        start_time=intent.time,
-        venue_slots=venue_slots,
-        restaurant_slots=restaurant_slots,
-        target_total_minutes=int(intent.duration_hours * 60),
-        home_to_first_km=venues[0].distance_km,
-    )
-    steps = [PlanStep(**s) for s in raw_steps]
-    total_min = sum(s.duration_minutes for s in steps)
-    cost = sum(v.price_per_person for v in venues) * intent.group_size
-    cost += restaurant.avg_price_per_person * intent.group_size
-
     all_venue_ids = [v.id for v in venues]
     venue_names = " → ".join(v.name for v in venues)
-    non_travel_steps = [s for s in steps if s.step_type not in ("travel", "return")]
 
-    plan = ItineraryPlan(
-        id=f"plan_rev_r_{'_'.join(all_venue_ids)}_{restaurant.id}",
-        title=f"{venue_names} + {restaurant.name}",
-        scenario_type=intent.scenario_type,
-        summary=f"{intent.time} 出发，{venue_names}，之后在 {restaurant.name} 用餐",
-        steps=steps,
-        estimated_total_cost=round(cost, 0),
-        total_duration_minutes=total_min,
-        score=0.0,
-        score_breakdown=ScoreBreakdown(
-            distance_score=0.0, time_score=0.0,
-            group_fit_score=0.0, restaurant_score=0.0, execution_score=0.0,
-        ),
-        reasons=[f"保留原场馆 {primary_venue.name}，替换餐厅为 {restaurant.name}"],
-        risks=[],
-        required_actions=_required_actions(primary_venue, restaurant),
-        venue_id=primary_venue.id,
-        venue_ids=all_venue_ids,
-        restaurant_id=restaurant.id,
-        stop_count=len(non_travel_steps),
-    )
-    return [plan]
+    plans: list[ItineraryPlan] = []
+    for restaurant in restaurants[:3]:
+        restaurant_slots = [RestaurantSlot(restaurant=restaurant, role="meal")]
+
+        raw_steps = build_dynamic_timeline(
+            start_time=intent.time,
+            venue_slots=venue_slots,
+            restaurant_slots=restaurant_slots,
+            target_total_minutes=int(intent.duration_hours * 60),
+            home_to_first_km=venues[0].distance_km,
+        )
+        steps = [PlanStep(**s) for s in raw_steps]
+        total_min = sum(s.duration_minutes for s in steps)
+        cost = sum(v.price_per_person for v in venues) * intent.group_size
+        cost += restaurant.avg_price_per_person * intent.group_size
+        non_travel_steps = [s for s in steps if s.step_type not in ("travel", "return")]
+
+        plan = ItineraryPlan(
+            id=f"plan_rev_r_{'_'.join(all_venue_ids)}_{restaurant.id}",
+            title=f"{venue_names} + {restaurant.name}",
+            scenario_type=intent.scenario_type,
+            summary=f"{intent.time} 出发，{venue_names}，之后在 {restaurant.name} 用餐",
+            steps=steps,
+            estimated_total_cost=round(cost, 0),
+            total_duration_minutes=total_min,
+            score=0.0,
+            score_breakdown=ScoreBreakdown(
+                distance_score=0.0, time_score=0.0,
+                group_fit_score=0.0, restaurant_score=0.0, execution_score=0.0,
+            ),
+            reasons=[f"保留原场馆 {primary_venue.name}，替换餐厅为 {restaurant.name}"],
+            risks=[],
+            required_actions=_required_actions(primary_venue, restaurant),
+            venue_id=primary_venue.id,
+            venue_ids=all_venue_ids,
+            restaurant_id=restaurant.id,
+            stop_count=len(non_travel_steps),
+        )
+        plans.append(plan)
+
+    return plans
 
 
 def revise_venue_only(

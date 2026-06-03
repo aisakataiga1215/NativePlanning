@@ -154,6 +154,7 @@ def build_dynamic_timeline(
     restaurant_slots: list[RestaurantSlot],
     target_total_minutes: int,
     home_to_first_km: float,
+    insert_meal_after_first: bool = False,
 ) -> list[dict]:
     """Build a dynamic multi-stop timeline respecting the total time budget.
 
@@ -168,6 +169,10 @@ def build_dynamic_timeline(
 
     Activity duration is chosen from [suggested_duration_min, suggested_duration_max]
     based on remaining budget. Meal duration from [suggested_meal_duration_min/max].
+
+    When insert_meal_after_first=True and len(restaurant_slots) >= 2:
+      - restaurant_slots[0] becomes lunch (inserted after venue_slots[0])
+      - restaurant_slots[1:] become dinner (placed after all venues)
     """
     from src.schemas.plan import PlanStep  # noqa: F401 — used for type hint below
 
@@ -175,38 +180,53 @@ def build_dynamic_timeline(
     current_time = start_time
     used_minutes = 0
 
-    # --- travel to first venue ---
-    first_venue = venue_slots[0].venue
+    # Split meals: early (lunch after first venue) vs late (after all venues)
+    if insert_meal_after_first and len(restaurant_slots) >= 2:
+        early_meals = restaurant_slots[:1]
+        late_meals = restaurant_slots[1:]
+    else:
+        early_meals = []
+        late_meals = restaurant_slots
+
+    # --- fixed overhead components ---
     first_same_area = True  # assume departure from nearby home
     travel_out = estimate_travel_minutes(home_to_first_km, same_area=first_same_area)
     return_travel = estimate_travel_minutes(home_to_first_km, same_area=first_same_area)
 
-    # --- compute return travel so we reserve it from the budget ---
-    # also reserve meal(s) time
-    meal_reserve = 0
-    for rs in restaurant_slots:
-        meal_reserve += rs.restaurant.suggested_meal_duration_min
+    late_meal_reserve = sum(rs.restaurant.suggested_meal_duration_min for rs in late_meals)
+    early_meal_reserve = sum(rs.restaurant.suggested_meal_duration_min for rs in early_meals)
 
-    # inter-venue travel between activity stops
+    # early meal travel: venue_0 → lunch → venue_1
+    early_meal_travel = 0
+    if early_meals:
+        r0_early = early_meals[0].restaurant
+        early_meal_travel += max(10, estimate_travel_minutes(r0_early.distance_from_venue_km))
+        if len(venue_slots) > 1:
+            same_lv = getattr(r0_early, "area", "") == venue_slots[1].venue.area
+            early_meal_travel += estimate_travel_minutes(1.5, same_area=same_lv)
+
+    # inter-venue travel (skip i==0 when early meal handles that transition)
+    inter_start = 1 if (early_meals and len(venue_slots) > 1) else 0
     inter_travel = 0
-    for i in range(len(venue_slots) - 1):
+    for i in range(inter_start, len(venue_slots) - 1):
         v_a = venue_slots[i].venue
         v_b = venue_slots[i + 1].venue
         same = v_a.area == v_b.area
         inter_travel += estimate_travel_minutes(
-            venue_slots[i + 1].venue.distance_from_venue_km
-            if hasattr(venue_slots[i + 1].venue, "distance_from_venue_km")
-            else 1.5,
+            getattr(venue_slots[i + 1].venue, "distance_from_venue_km", 1.5),
             same_area=same,
         )
 
-    # travel from last venue to first restaurant
+    # travel from last venue to first late meal restaurant
     rest_travel = 0
-    if restaurant_slots:
-        r_dist = restaurant_slots[0].restaurant.distance_from_venue_km
+    if late_meals:
+        r_dist = late_meals[0].restaurant.distance_from_venue_km
         rest_travel = max(10, estimate_travel_minutes(r_dist))
 
-    fixed_overhead = travel_out + meal_reserve + inter_travel + rest_travel + return_travel
+    fixed_overhead = (
+        travel_out + early_meal_reserve + early_meal_travel
+        + inter_travel + late_meal_reserve + rest_travel + return_travel
+    )
     activity_budget = target_total_minutes - fixed_overhead
 
     if activity_budget <= 0:
@@ -220,8 +240,6 @@ def build_dynamic_timeline(
         min_d = v.suggested_duration_min
         max_d = v.suggested_duration_max
         share = max(1, activity_budget // len(venue_slots))
-        # Prefer at least min_d, but if budget share is tighter, use share
-        # (budget guarantee takes priority over suggested minimum)
         duration = min(max_d, max(min_d, share) if share >= min_d else share)
         venue_durations.append(duration)
 
@@ -264,8 +282,66 @@ def build_dynamic_timeline(
         used_minutes += dur
         current_time = leave
 
-        # travel to next venue (if any)
-        if idx < len(venue_slots) - 1:
+        if idx == 0 and early_meals:
+            # Insert lunch between first and second venue
+            r_lunch = early_meals[0].restaurant
+            t_to_lunch = max(10, estimate_travel_minutes(r_lunch.distance_from_venue_km))
+            arrive_lunch = add_minutes(current_time, t_to_lunch)
+            steps.append({
+                "step_type": "travel",
+                "title": f"前往 {r_lunch.name}",
+                "location_name": "途中",
+                "start_time": current_time,
+                "end_time": arrive_lunch,
+                "duration_minutes": t_to_lunch,
+                "distance_from_previous_km": r_lunch.distance_from_venue_km,
+                "notes": f"距场馆约 {r_lunch.distance_from_venue_km} km",
+                "related_entity_id": None,
+                "area": "",
+            })
+            used_minutes += t_to_lunch
+            current_time = arrive_lunch
+
+            lunch_dur = r_lunch.suggested_meal_duration_min
+            leave_lunch = add_minutes(current_time, lunch_dur)
+            steps.append({
+                "step_type": "meal",
+                "title": f"午餐 {r_lunch.name}",
+                "location_name": r_lunch.name,
+                "start_time": current_time,
+                "end_time": leave_lunch,
+                "duration_minutes": lunch_dur,
+                "distance_from_previous_km": 0.0,
+                "notes": "",
+                "related_entity_id": r_lunch.id,
+                "area": getattr(r_lunch, "area", ""),
+            })
+            used_minutes += lunch_dur
+            current_time = leave_lunch
+
+            # travel from lunch back to the next venue
+            if len(venue_slots) > 1:
+                next_v = venue_slots[1].venue
+                same = getattr(r_lunch, "area", "") == next_v.area
+                t_to_next = estimate_travel_minutes(1.5, same_area=same)
+                next_arrive = add_minutes(current_time, t_to_next)
+                steps.append({
+                    "step_type": "travel",
+                    "title": f"前往 {next_v.name}",
+                    "location_name": "途中",
+                    "start_time": current_time,
+                    "end_time": next_arrive,
+                    "duration_minutes": t_to_next,
+                    "distance_from_previous_km": 1.5,
+                    "notes": "",
+                    "related_entity_id": None,
+                    "area": "",
+                })
+                used_minutes += t_to_next
+                current_time = next_arrive
+
+        elif idx < len(venue_slots) - 1:
+            # Normal inter-venue travel
             next_v = venue_slots[idx + 1].venue
             same = v.area == next_v.area
             t = estimate_travel_minutes(1.5, same_area=same)
@@ -285,9 +361,9 @@ def build_dynamic_timeline(
             used_minutes += t
             current_time = next_arrive
 
-    # --- travel to first restaurant ---
-    if restaurant_slots:
-        r0 = restaurant_slots[0].restaurant
+    # --- travel to first late meal restaurant ---
+    if late_meals:
+        r0 = late_meals[0].restaurant
         t_to_rest = max(10, estimate_travel_minutes(r0.distance_from_venue_km))
         arrive_rest = add_minutes(current_time, t_to_rest)
         steps.append({
@@ -305,8 +381,8 @@ def build_dynamic_timeline(
         used_minutes += t_to_rest
         current_time = arrive_rest
 
-        # --- steps: meals ---
-        for ridx, rs in enumerate(restaurant_slots):
+        # --- steps: late meals (dinner) ---
+        for ridx, rs in enumerate(late_meals):
             r = rs.restaurant
             available_for_meal = max(0, target_total_minutes - used_minutes - return_travel)
             meal_dur = min(
@@ -316,10 +392,11 @@ def build_dynamic_timeline(
             # Budget guarantee: never overflow the remaining window
             meal_dur = max(1, min(meal_dur, available_for_meal))
 
+            meal_title = f"晚餐 {r.name}" if early_meals else f"在 {r.name} 用餐"
             leave_rest = add_minutes(current_time, meal_dur)
             steps.append({
                 "step_type": "meal",
-                "title": f"在 {r.name} 用餐",
+                "title": meal_title,
                 "location_name": r.name,
                 "start_time": current_time,
                 "end_time": leave_rest,
@@ -327,14 +404,14 @@ def build_dynamic_timeline(
                 "distance_from_previous_km": 0.0,
                 "notes": "",
                 "related_entity_id": r.id,
-                "area": r.area,
+                "area": getattr(r, "area", ""),
             })
             used_minutes += meal_dur
             current_time = leave_rest
 
-            # travel between restaurants (rare — only if 2 meals)
-            if ridx < len(restaurant_slots) - 1:
-                next_r = restaurant_slots[ridx + 1].restaurant
+            # travel between restaurants (rare — only if 2+ late meals)
+            if ridx < len(late_meals) - 1:
+                next_r = late_meals[ridx + 1].restaurant
                 t = max(10, estimate_travel_minutes(next_r.distance_from_venue_km))
                 next_arrive_r = add_minutes(current_time, t)
                 steps.append({

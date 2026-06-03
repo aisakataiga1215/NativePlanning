@@ -152,9 +152,6 @@ def _render_intent_panel(generate: GenerateResponse) -> None:
         if intent.raw_input:
             st.caption(f"原始输入：{intent.raw_input}")
 
-        with st.expander("🔍 调试信息", expanded=False):
-            st.json(intent.model_dump())
-
 
 def _render_warnings(warnings: list[str]) -> None:
     for warning in warnings:
@@ -199,11 +196,17 @@ def _render_plan_card(plan: ItineraryPlan, group_size: int = 1) -> None:
 
         st.markdown(f"**预估费用 （共 {group_size} 人）**")
         cost_cols = st.columns(3)
-        if venue:
-            ticket_total = venue.price_per_person * group_size
-            ticket_label = "免费" if venue.price_per_person == 0 else f"¥{ticket_total:.0f}"
-            cost_cols[0].metric("🎟 门票", ticket_label,
-                                help=f"¥{venue.price_per_person:.0f}/人 × {group_size}人" if venue.price_per_person else "无需购票")
+        all_venue_data = [_get_venue(vid) for vid in plan.venue_ids if _get_venue(vid)]
+        if all_venue_data:
+            ticket_price_sum = sum(v.price_per_person for v in all_venue_data) * group_size
+            ticket_label = "免费" if ticket_price_sum == 0 else f"¥{ticket_price_sum:.0f}"
+            if len(all_venue_data) > 1:
+                help_str = " + ".join(f"{v.name} ¥{v.price_per_person:.0f}/人" for v in all_venue_data)
+            elif all_venue_data[0].price_per_person:
+                help_str = f"¥{all_venue_data[0].price_per_person:.0f}/人 × {group_size}人"
+            else:
+                help_str = "无需购票"
+            cost_cols[0].metric("🎟 门票", ticket_label, help=help_str)
         else:
             cost_cols[0].metric("🎟 门票", "—")
         if restaurant:
@@ -254,9 +257,10 @@ def _render_plan_card(plan: ItineraryPlan, group_size: int = 1) -> None:
                 if extra:
                     st.markdown("---")
                     st.markdown(
-                        f"**{extra.name}**  ·  {extra.rating}⭐  ·  "
+                        f"**{extra.name}**  ·  {extra.rating}⭐ ({extra.review_count} 评)  ·  "
                         f"🕐 {extra.open_time} – {extra.close_time}"
                     )
+                    st.caption(f"⏱ {extra.suggested_duration_min}–{extra.suggested_duration_max} 分钟")
                     if extra.specialty_tags:
                         st.caption("  ".join(f"`{t}`" for t in extra.specialty_tags[:3]))
 
@@ -314,7 +318,7 @@ def _render_timeline(plan: ItineraryPlan) -> None:
             icon = _STEP_ICON.get(step.step_type, "")
             title_str = f"{icon} {step.title}".strip()
             if step.notes:
-                title_str += f"  _({step.notes})_"
+                title_str += f" ({step.notes})"
             rows.append({
                 "时间": f"{step.start_time} – {step.end_time}",
                 "步骤": title_str,
