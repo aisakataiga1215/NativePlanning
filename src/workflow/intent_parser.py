@@ -180,6 +180,14 @@ def _llm_to_intent(llm: UserIntentLLM, raw_input: str) -> UserIntent:
         for p in ("group_friendly", "quiet", "transport_convenient"):
             if p not in prefs:
                 prefs.append(p)
+
+    req_acts, req_meals, req_places = _extract_requests(raw_input)
+    plan_mode = _extract_plan_mode(raw_input)
+    if plan_mode == "meal_only":
+        prefs = []  # suppress venue-preference defaults for meal-only queries
+    merged_acts = list(dict.fromkeys(req_acts + prefs))
+    location_anchor = llm.location_anchor or _extract_location_anchor(raw_input)
+
     return UserIntent(
         scenario_type=llm.scenario_type,
         group_size=llm.group_size,
@@ -187,11 +195,16 @@ def _llm_to_intent(llm: UserIntentLLM, raw_input: str) -> UserIntent:
         time=llm.time,
         duration_hours=llm.duration_hours,
         max_distance_km=llm.max_distance_km,
-        activity_preferences=prefs,
-        meal_preferences=list(llm.meal_preferences),
+        activity_preferences=merged_acts,
+        meal_preferences=list(llm.meal_preferences) + req_meals,
+        requested_activities=req_acts,
+        requested_meals=req_meals,
+        requested_places=req_places,
         soft_preferences=soft_prefs,
         budget_preference=llm.budget_preference,
-        location_anchor=llm.location_anchor,
+        meal_policy=_extract_meal_policy(raw_input),
+        plan_mode=plan_mode,
+        location_anchor=location_anchor,
         raw_input=raw_input,
         source="llm",
     )
@@ -315,6 +328,42 @@ def _detect_participants(text: str) -> list[Participant]:
     return participants
 
 
+def _extract_meal_policy(text: str) -> str:
+    """Detect meal_policy from text keywords."""
+    _EXCLUDED = (
+        "不吃饭", "不用吃饭", "不安排吃的", "不要餐厅", "饭我自己解决",
+        "不需要餐厅", "不用管吃", "自己解决吃饭", "不要安排餐厅",
+    )
+    _OPTIONAL = (
+        "随便吃点", "可吃可不吃", "有合适的再吃", "吃不吃无所谓", "顺便吃点",
+    )
+    if any(k in text for k in _EXCLUDED):
+        return "excluded"
+    if any(k in text for k in _OPTIONAL):
+        return "optional"
+    return "required"
+
+
+_MEAL_ONLY_KEYWORDS = (
+    "去吃", "吃饭", "找餐厅", "吃个饭", "只想吃", "就是吃",
+    "烛光晚餐", "吃晚饭", "吃点东西", "找个地方吃", "和老婆吃",
+)
+_ACTIVITY_EXPLICIT_KEYWORDS = (
+    "动物园", "乐园", "公园", "博物馆", "看展", "电影",
+    "夜市", "citywalk", "逛街", "密室", "剧本杀",
+)
+
+
+def _extract_plan_mode(text: str) -> str:
+    has_meal     = any(kw in text for kw in _MEAL_ONLY_KEYWORDS)
+    has_activity = any(kw in text for kw in _ACTIVITY_EXPLICIT_KEYWORDS)
+    if has_meal and not has_activity:
+        return "meal_only"
+    if has_meal:
+        return "meal_first"
+    return "activity_first"
+
+
 def _extract_requests(text: str) -> tuple[list[str], list[str], list[str]]:
     """Extract (requested_activities, requested_meals, requested_places) from text."""
     req_acts: list[str] = []
@@ -362,6 +411,7 @@ def _rule_fallback(user_input: str) -> UserIntent:
 
     participants = _detect_participants(text)
     req_acts, req_meals, req_places = _extract_requests(text)
+    plan_mode = _extract_plan_mode(text)
 
     # Scenario: child/senior → family; couple; colleagues; friends; unknown
     if has_child or has_senior:
@@ -370,7 +420,7 @@ def _rule_fallback(user_input: str) -> UserIntent:
         meal_prefs = ["kid_friendly", "healthy"] if has_child else ["healthy", "group_friendly"]
     elif has_couple:
         scenario = "couple"
-        act_prefs = ["romantic", "photo", "walk"]
+        act_prefs = [] if plan_mode == "meal_only" else ["romantic", "photo", "walk"]
         meal_prefs = ["romantic", "affordable"]
     elif has_colleagues:
         scenario = "colleagues"
@@ -432,6 +482,8 @@ def _rule_fallback(user_input: str) -> UserIntent:
         warnings=warnings,
         participants=participants,
         budget_preference="medium",
+        meal_policy=_extract_meal_policy(text),
+        plan_mode=plan_mode,
         location_anchor=_extract_location_anchor(text),
         raw_input=user_input,
         source="rule_based",

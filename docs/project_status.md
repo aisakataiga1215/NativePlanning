@@ -2,13 +2,28 @@
 
 ## 1. Current Phase
 
-Current phase: **MVP-4.5 Complete**
+Current phase: **MVP-4.6 Complete**
 
-MVP-4.5 adds five horizontal enhancements on top of MVP-4: natural-language date/time parsing, opening-hours filtering with ranker penalty, ticket-type schemas and UI, revision scope (partial re-plan for restaurant-only or venue-only changes), and UI completeness (intent panel, timeline icons, venue/restaurant hours cards).
+MVP-4.6 fixed 7 of 9 consistency bugs (A, B, C, D, F, G, I) exposed in MVP-4.5 testing. Bugs E (budget preference UI diff) and H (local_life_catalog.md) remain deferred.
 
 Next milestone: **MVP-5** (TBD).
 
 ## 2. Milestones
+
+### MVP-4.6: Bugfix & Data Consistency Pass
+
+Status: **Complete** (2026-06-03)
+
+Delivered (Bugs A, B, C, D, F, G, I):
+- `ItineraryPlan.feasible` / `infeasible_reasons` fields
+- Explicit activity guarantee: `generate_plans()` candidate pinning + `rank_plans(pinned_venue_ids)`
+- Opening hours hard filter: truncation when `available >= min_duration`; `feasible=False` otherwise
+- Destination-type activity: `build_destination_timeline()`, `is_destination` venue field, venue_013/014 updated
+- Full-day meal timing: `needs_lunch = start < 11:00 AND end > 12:30`; 14:00-start no longer gets lunch
+- `meal_policy` (required/optional/excluded): parser, planner, executor, message_agent, UI
+- Tool duration: `perf_counter` + `_fmt_elapsed()` UI helper
+- Regression test: `plan.reasons` never contains "多站点"
+- 26 new tests; **242/243 total** (1 skipped)
 
 ### MVP-4.5: Time-Aware Planning + Opening Hours + Revision Scope + UI Completeness
 
@@ -145,4 +160,5 @@ Documentation: `docs/data_simulation.md` (mock data strategy), `docs/handoff_mvp
 
 ## 4. Next Steps
 
-1. MVP-5 (TBD): Real API integration, SQLite persistence, or additional planning scenarios.
+1. **MVP-4.6 Bugfix Pass**: Follow Phase 1–9 in `docs/handoff_mvp46_bugfix.md`. Start new Claude Code session with the prompt at the end of that document.
+2. MVP-5 (TBD): Real API integration, SQLite persistence, or additional planning scenarios.

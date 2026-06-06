@@ -30,10 +30,10 @@ def traced_call(
     log: TraceLog,
     **kwargs: Any,
 ) -> Any:
-    start = time.monotonic()
+    start = time.perf_counter()
     try:
         result = fn(**kwargs)
-        elapsed = (time.monotonic() - start) * 1000
+        elapsed = (time.perf_counter() - start) * 1000
         log.add(ToolTrace(
             tool_name=tool_name,
             inputs=kwargs,
@@ -43,7 +43,7 @@ def traced_call(
         ))
         return result
     except Exception as exc:
-        elapsed = (time.monotonic() - start) * 1000
+        elapsed = (time.perf_counter() - start) * 1000
         log.add(ToolTrace(
             tool_name=tool_name,
             inputs=kwargs,

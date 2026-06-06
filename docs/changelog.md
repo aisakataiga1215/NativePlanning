@@ -2,6 +2,30 @@
 
 All meaningful project changes should be recorded in this file.
 
+## [MVP-4.6] - 2026-06-03 (Bugfix & Data Consistency Pass)
+
+### Fixed
+
+- **Bug A — Explicit activity guarantee** (`src/workflow/planner.py`, `src/services/plan_ranker.py`): `generate_plans()` now separates explicit candidates from others; feasible explicit plans are returned at index 0. `rank_plans()` gains `pinned_venue_ids` to prevent scoring from undoing the placement. `explicit_bonus` raised to 0.30 with 0.50 distance floor.
+- **Bug B — Opening hours hard filter** (`src/workflow/planner.py`): When activity step overruns `close_time`: if `available_min >= suggested_duration_min`, timeline is truncated via `_recalculate_steps_after_truncation()` (shifts all subsequent steps by delta); otherwise `plan.feasible=False`. `generate_plans()` non-explicit path returns only feasible plans when available.
+- **Bug C — Destination activity** (`src/services/itinerary_builder.py`, `src/workflow/planner.py`, `src/schemas/venue.py`, `src/mock_api/venues.py`): `is_destination` venues (zoo/theme_park) use `build_destination_timeline()` — single venue multi-segment (morning activity → optional lunch → afternoon activity) — instead of inserting secondary activity stops. venue_013 and venue_014 updated with `is_destination=True`.
+- **Bug D — Full-day meal timing** (`src/workflow/planner.py`): Lunch slot inserted only when `start_min < 11*60 AND end_min > 12*60+30` (`needs_lunch`). 14:00-start plans no longer incorrectly receive a lunch restaurant slot.
+- **Bug F — Regression test** (`tests/test_bugfix_mvp46.py`): `test_plan_reasons_no_multistop_label` verifies `plan.reasons` never contains "多站点".
+- **Bug G — Tool duration format** (`src/tools/wrappers.py`, `src/ui/app.py`): `traced_call` now uses `time.perf_counter()` instead of `time.monotonic()`. `_fmt_elapsed(ms)` helper added to UI; trace table column shows "<1ms" for sub-millisecond calls.
+- **Bug I — meal_policy** (`src/schemas/user_intent.py`, `src/workflow/intent_parser.py`, `src/workflow/planner.py`, `src/workflow/executor.py`, `src/workflow/message_agent.py`, `src/ui/app.py`): New `meal_policy: Literal["required","optional","excluded"] = "required"` field. Parser extracts keywords ("不吃饭"→excluded, "随便吃点"→optional). Excluded policy skips restaurant search, removes meal steps, skips `reserve_restaurant` action, suppresses restaurant info in share message and UI.
+
+### Added
+
+- `ItineraryPlan.feasible: bool = True` and `infeasible_reasons: list[str]` fields (`src/schemas/plan.py`)
+- `Venue.is_destination`, `onsite_meal_available`, `nearby_meal_area` fields (`src/schemas/venue.py`)
+- `build_destination_timeline()` in `src/services/itinerary_builder.py`
+- `_recalculate_steps_after_truncation()` in `src/workflow/planner.py`
+- `get_explicit_venue_ids()` in `src/services/plan_ranker.py`
+- `_fmt_elapsed()` in `src/ui/app.py`
+- 26 new tests across `tests/test_bugfix_mvp46.py` and `tests/test_meal_policy.py`; **242/243 total** (1 skipped)
+
+---
+
 ## [MVP-4.5] - 2026-06-02
 
 ### Added

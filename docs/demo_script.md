@@ -23,7 +23,7 @@ cd E:\git-clone\NativePlanning
 如需 LLM 意图解析（可选），在 `.env` 中设置：
 ```
 OPENAI_API_KEY=sk-...
-OPENAI_BASE_URL=https://api.deepseek.com/v1   # 兼容 DeepSeek
+OPENAI_BASE_URL=https://api.deepseek.com/   # 兼容 DeepSeek
 OPENAI_MODEL=deepseek-chat
 ```
 不设置时自动退回规则解析，全部功能仍可演示。

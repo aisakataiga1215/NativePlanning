@@ -179,3 +179,17 @@ class ItineraryPlan(BaseModel):
         ge=1,
         description="Number of non-travel steps (activities + meals).",
     )
+
+    # --- MVP-4.6: feasibility ---
+    feasible: bool = Field(
+        default=True,
+        description="False when this plan has an unresolvable constraint such as venue being closed.",
+    )
+    infeasible_reasons: list[str] = Field(
+        default_factory=list,
+        description="Human-readable reasons why the plan is infeasible.",
+    )
+    opening_fit: float = Field(
+        default=1.0,
+        description="Min opening_fit across all entity steps. 1.0=fully open, 0.7=adjusted, 0.0=infeasible",
+    )

@@ -474,6 +474,9 @@ VENUES: list[Venue] = [
         specialty_tags=["亲子推荐", "全家出游首选"],
         area="远郊区",
         nearby_areas=["晨阳区"],
+        is_destination=True,
+        onsite_meal_available=True,
+        nearby_meal_area="主题乐园美食街",
     ),
     # MVP-4 expansion: additional venues for richer demo coverage
     Venue(
@@ -504,6 +507,9 @@ VENUES: list[Venue] = [
         specialty_tags=["亲子必去", "教育体验"],
         area="远郊区",
         nearby_areas=["晨阳区"],
+        is_destination=True,
+        onsite_meal_available=True,
+        nearby_meal_area="动物园东门餐饮区",
         venue_coupons=[
             VenueCoupon(
                 id="vc_014",

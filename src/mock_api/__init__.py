@@ -5,6 +5,7 @@ from src.mock_api.restaurants import (
     get_restaurant,
     get_coupon,
     search_restaurants,
+    search_restaurants_any_location,
     get_coupons_for,
 )
 from src.mock_api.booking import (
@@ -24,6 +25,7 @@ __all__ = [
     "get_coupon",
     "search_venues",
     "search_restaurants",
+    "search_restaurants_any_location",
     "get_coupons_for",
     "check_venue_availability",
     "book_venue",

@@ -23,7 +23,7 @@ from src.api.app import _trace_to_dict
 from src.api.schemas import ExecuteResponse, GenerateResponse
 from src.schemas.plan import ItineraryPlan
 from src.schemas.user_intent import UserIntent
-from src.services.plan_ranker import rank_plans
+from src.services.plan_ranker import rank_plans, get_explicit_venue_ids
 from src.tools.wrappers import TraceLog
 from src.workflow.constraint_solver import validate_and_repair
 from src.workflow.executor import execute_plan
@@ -58,6 +58,7 @@ class InProcessClient:
         intent = parse_free_text(user_input)
         plans = generate_plans(intent, log)
         repaired = [validate_and_repair(p, intent, log) for p in plans]
+        _pinned = get_explicit_venue_ids(intent.requested_activities) if intent.requested_activities else None
         ranked = rank_plans(
             repaired, intent.max_distance_km, intent.duration_hours,
             participants=intent.participants or None,
@@ -65,6 +66,7 @@ class InProcessClient:
             hard_constraints=intent.hard_constraints or None,
             location_anchor=intent.location_anchor,
             requested_meals=intent.requested_meals or None,
+            pinned_venue_ids=_pinned or None,
         )
         best = ranked[0]
         return GenerateResponse(
@@ -101,6 +103,7 @@ class InProcessClient:
         else:
             plans = generate_plans(updated_intent, log)
         repaired = [validate_and_repair(p, updated_intent, log) for p in plans]
+        _pinned_r = get_explicit_venue_ids(updated_intent.requested_activities) if updated_intent.requested_activities else None
         ranked = rank_plans(
             repaired, updated_intent.max_distance_km, updated_intent.duration_hours,
             participants=updated_intent.participants or None,
@@ -108,6 +111,7 @@ class InProcessClient:
             hard_constraints=updated_intent.hard_constraints or None,
             location_anchor=updated_intent.location_anchor,
             requested_meals=updated_intent.requested_meals or None,
+            pinned_venue_ids=_pinned_r or None,
         )
         best = ranked[0]
         return GenerateResponse(

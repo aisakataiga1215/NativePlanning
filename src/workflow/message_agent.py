@@ -32,6 +32,23 @@ _FALLBACK_TEMPLATE = (
     "{booking_note}"
 )
 
+_FAMILY_NO_MEAL_TEMPLATE = (
+    "搞定了！{date}{time}出发，我们去{venue_name}玩。"
+    "{booking_note}"
+    "估计{return_time}左右到家。"
+)
+_FRIENDS_NO_MEAL_TEMPLATE = (
+    "安排好了！{date}{time}出发，去{venue_name}玩。"
+    "{booking_note}"
+)
+_COUPLE_NO_MEAL_TEMPLATE = (
+    "安排好了！{date}{time}出发，去{venue_name}约会。"
+    "{booking_note}"
+)
+_FALLBACK_NO_MEAL_TEMPLATE = (
+    "计划已安排：{date}{time}出发，前往{venue_name}。{booking_note}"
+)
+
 
 def _booking_note(results: list[ExecutionResult]) -> str:
     notes = []
@@ -87,11 +104,12 @@ def _llm_message(
     booking = _booking_note(results)
     date_str = "今天" if intent.date == "today" else intent.date
 
+    meal_part = f"餐厅：{meal_time}去{restaurant}。" if meal_step else "不安排正餐。"
     summary = (
         f"场景：{intent.scenario_type}，{intent.group_size}人，"
         f"{date_str}{intent.time}出发。"
         f"活动地点：{venue}。"
-        f"餐厅：{meal_time}去{restaurant}。"
+        f"{meal_part}"
         f"{booking}"
     )
     if plan.warnings:
@@ -135,43 +153,76 @@ def _template_message(
     meal_time = meal_step.start_time if meal_step else ""
     return_time = return_step.end_time if return_step else ""
     note = _booking_note(results)
+    has_meal = bool(plan.restaurant_id)
 
     if intent.scenario_type == "family":
         has_senior = any(p.age_group == "senior" for p in (intent.participants or []))
         if has_senior:
-            msg = _SENIOR_TEMPLATE.format(
+            if has_meal:
+                msg = _SENIOR_TEMPLATE.format(
+                    date=date_str, time=intent.time,
+                    venue_name=venue_name, meal_time=meal_time,
+                    restaurant_name=restaurant_name, booking_note=note,
+                )
+            else:
+                msg = _FAMILY_NO_MEAL_TEMPLATE.format(
+                    date=date_str, time=intent.time,
+                    venue_name=venue_name, booking_note=note,
+                    return_time=return_time,
+                )
+        else:
+            if has_meal:
+                msg = _FAMILY_TEMPLATE.format(
+                    date=date_str, time=intent.time,
+                    venue_name=venue_name, meal_time=meal_time,
+                    restaurant_name=restaurant_name, booking_note=note,
+                    return_time=return_time,
+                )
+            else:
+                msg = _FAMILY_NO_MEAL_TEMPLATE.format(
+                    date=date_str, time=intent.time,
+                    venue_name=venue_name, booking_note=note,
+                    return_time=return_time,
+                )
+        receiver = "wife"
+    elif intent.scenario_type == "couple":
+        if has_meal:
+            msg = _COUPLE_TEMPLATE.format(
                 date=date_str, time=intent.time,
                 venue_name=venue_name, meal_time=meal_time,
                 restaurant_name=restaurant_name, booking_note=note,
             )
         else:
-            msg = _FAMILY_TEMPLATE.format(
+            msg = _COUPLE_NO_MEAL_TEMPLATE.format(
+                date=date_str, time=intent.time,
+                venue_name=venue_name, booking_note=note,
+            )
+        receiver = "partner"
+    elif intent.scenario_type == "friends":
+        if has_meal:
+            msg = _FRIENDS_TEMPLATE.format(
                 date=date_str, time=intent.time,
                 venue_name=venue_name, meal_time=meal_time,
                 restaurant_name=restaurant_name, booking_note=note,
-                return_time=return_time,
             )
-        receiver = "wife"
-    elif intent.scenario_type == "couple":
-        msg = _COUPLE_TEMPLATE.format(
-            date=date_str, time=intent.time,
-            venue_name=venue_name, meal_time=meal_time,
-            restaurant_name=restaurant_name, booking_note=note,
-        )
-        receiver = "partner"
-    elif intent.scenario_type == "friends":
-        msg = _FRIENDS_TEMPLATE.format(
-            date=date_str, time=intent.time,
-            venue_name=venue_name, meal_time=meal_time,
-            restaurant_name=restaurant_name, booking_note=note,
-        )
+        else:
+            msg = _FRIENDS_NO_MEAL_TEMPLATE.format(
+                date=date_str, time=intent.time,
+                venue_name=venue_name, booking_note=note,
+            )
         receiver = "friend_group"
     else:
-        msg = _FALLBACK_TEMPLATE.format(
-            date=date_str, time=intent.time,
-            venue_name=venue_name,
-            restaurant_name=restaurant_name, booking_note=note,
-        )
+        if has_meal:
+            msg = _FALLBACK_TEMPLATE.format(
+                date=date_str, time=intent.time,
+                venue_name=venue_name,
+                restaurant_name=restaurant_name, booking_note=note,
+            )
+        else:
+            msg = _FALLBACK_NO_MEAL_TEMPLATE.format(
+                date=date_str, time=intent.time,
+                venue_name=venue_name, booking_note=note,
+            )
         receiver = "unknown"
 
     if plan.warnings:

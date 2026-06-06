@@ -445,3 +445,168 @@ def build_dynamic_timeline(
     })
 
     return steps
+
+
+def build_destination_timeline(
+    start_time: str,
+    venue: "Venue",
+    restaurant_slots: list[RestaurantSlot],
+    target_total_minutes: int,
+    home_to_venue_km: float,
+    needs_lunch: bool,
+) -> list[dict]:
+    """Single destination venue (zoo / theme_park) with multi-segment timeline.
+
+    With lunch:   travel_out → activity_morning → travel → meal → travel_back → activity_afternoon → travel_return
+    Without lunch: travel_out → activity_main → travel_return
+    """
+    steps: list[dict] = []
+    current_time = start_time
+
+    travel_out = estimate_travel_minutes(home_to_venue_km)
+    return_travel = estimate_travel_minutes(home_to_venue_km)
+
+    r_lunch = restaurant_slots[0].restaurant if (needs_lunch and restaurant_slots) else None
+    if r_lunch:
+        lunch_travel_to = max(5, estimate_travel_minutes(r_lunch.distance_from_venue_km))
+        lunch_travel_back = max(5, estimate_travel_minutes(r_lunch.distance_from_venue_km))
+        lunch_dur = r_lunch.suggested_meal_duration_min
+        lunch_overhead = lunch_travel_to + lunch_dur + lunch_travel_back
+    else:
+        lunch_travel_to = lunch_travel_back = lunch_dur = lunch_overhead = 0
+
+    activity_budget = target_total_minutes - travel_out - return_travel - lunch_overhead
+    activity_budget = max(venue.suggested_duration_min, activity_budget)
+
+    # --- depart ---
+    arrive_venue = add_minutes(current_time, travel_out)
+    steps.append({
+        "step_type": "travel",
+        "title": "出发前往目的地",
+        "location_name": "途中",
+        "start_time": current_time,
+        "end_time": arrive_venue,
+        "duration_minutes": travel_out,
+        "distance_from_previous_km": home_to_venue_km,
+        "notes": f"距家约 {home_to_venue_km} km",
+        "related_entity_id": None,
+        "area": "",
+    })
+    current_time = arrive_venue
+
+    if r_lunch is not None:
+        # morning segment (~55% of activity budget)
+        morning_dur = max(venue.suggested_duration_min // 2 or 30, int(activity_budget * 0.55))
+        morning_end = add_minutes(current_time, morning_dur)
+        steps.append({
+            "step_type": "activity",
+            "title": f"游玩 {venue.name}（上午）",
+            "location_name": venue.name,
+            "start_time": current_time,
+            "end_time": morning_end,
+            "duration_minutes": morning_dur,
+            "distance_from_previous_km": 0.0,
+            "notes": "",
+            "related_entity_id": venue.id,
+            "area": venue.area,
+        })
+        current_time = morning_end
+
+        # travel to lunch
+        arrive_lunch = add_minutes(current_time, lunch_travel_to)
+        steps.append({
+            "step_type": "travel",
+            "title": f"前往 {r_lunch.name}",
+            "location_name": "途中",
+            "start_time": current_time,
+            "end_time": arrive_lunch,
+            "duration_minutes": lunch_travel_to,
+            "distance_from_previous_km": r_lunch.distance_from_venue_km,
+            "notes": "",
+            "related_entity_id": None,
+            "area": "",
+        })
+        current_time = arrive_lunch
+
+        # lunch
+        leave_lunch = add_minutes(current_time, lunch_dur)
+        steps.append({
+            "step_type": "meal",
+            "title": f"午餐 {r_lunch.name}",
+            "location_name": r_lunch.name,
+            "start_time": current_time,
+            "end_time": leave_lunch,
+            "duration_minutes": lunch_dur,
+            "distance_from_previous_km": 0.0,
+            "notes": "",
+            "related_entity_id": r_lunch.id,
+            "area": getattr(r_lunch, "area", ""),
+        })
+        current_time = leave_lunch
+
+        # travel back to venue
+        arrive_back = add_minutes(current_time, lunch_travel_back)
+        steps.append({
+            "step_type": "travel",
+            "title": f"返回 {venue.name}",
+            "location_name": "途中",
+            "start_time": current_time,
+            "end_time": arrive_back,
+            "duration_minutes": lunch_travel_back,
+            "distance_from_previous_km": r_lunch.distance_from_venue_km,
+            "notes": "",
+            "related_entity_id": None,
+            "area": "",
+        })
+        current_time = arrive_back
+
+        # afternoon segment (~45%)
+        afternoon_dur = max(30, activity_budget - morning_dur)
+        afternoon_end = add_minutes(current_time, afternoon_dur)
+        steps.append({
+            "step_type": "activity",
+            "title": f"游玩 {venue.name}（下午）",
+            "location_name": venue.name,
+            "start_time": current_time,
+            "end_time": afternoon_end,
+            "duration_minutes": afternoon_dur,
+            "distance_from_previous_km": 0.0,
+            "notes": "",
+            "related_entity_id": venue.id,
+            "area": venue.area,
+        })
+        current_time = afternoon_end
+    else:
+        # single segment
+        main_dur = min(venue.suggested_duration_max, max(venue.suggested_duration_min, activity_budget))
+        main_end = add_minutes(current_time, main_dur)
+        steps.append({
+            "step_type": "activity",
+            "title": f"游玩 {venue.name}",
+            "location_name": venue.name,
+            "start_time": current_time,
+            "end_time": main_end,
+            "duration_minutes": main_dur,
+            "distance_from_previous_km": 0.0,
+            "notes": "",
+            "related_entity_id": venue.id,
+            "area": venue.area,
+        })
+        current_time = main_end
+
+    # --- return ---
+    return_arrive = add_minutes(current_time, return_travel)
+    steps.append({
+        "step_type": "return",
+        "title": "返回家中",
+        "location_name": "家",
+        "start_time": current_time,
+        "end_time": return_arrive,
+        "duration_minutes": return_travel,
+        "distance_from_previous_km": home_to_venue_km,
+        "notes": "",
+        "related_entity_id": None,
+        "area": "",
+    })
+
+    return steps

@@ -162,11 +162,15 @@ def test_planner_adds_warning_for_closed_venue():
 
 
 def test_ranker_penalises_closed_venue():
-    """Indoor kids playground (10:00-22:00) should score higher than zoo (09:00-17:30) at night."""
+    """Ranker multiplies by opening_fit: zoo plan (opening_fit=0.0) scores 0, kids plan (opening_fit=1.0) scores higher.
+
+    In the new architecture the planner sets opening_fit before scoring; the ranker
+    applies `final_score = opening_fit * aggregate` and never re-checks hours itself.
+    """
     from src.schemas.plan import ItineraryPlan, PlanStep, ScoreBreakdown
     from src.services.plan_ranker import score_plan
 
-    def _make_plan(venue_id: str, restaurant_id: str, plan_id: str) -> ItineraryPlan:
+    def _make_plan(venue_id: str, restaurant_id: str, plan_id: str, opening_fit: float) -> ItineraryPlan:
         return ItineraryPlan(
             id=plan_id,
             title="test",
@@ -179,6 +183,7 @@ def test_ranker_penalises_closed_venue():
                 end_time="21:00",
                 location_name="loc",
                 duration_minutes=120,
+                related_entity_id=venue_id,
             )],
             estimated_total_cost=300.0,
             total_duration_minutes=240,
@@ -192,21 +197,21 @@ def test_ranker_penalises_closed_venue():
             required_actions=[],
             venue_id=venue_id,
             restaurant_id=restaurant_id,
+            opening_fit=opening_fit,
+            feasible=(opening_fit > 0.0),
         )
 
-    zoo_plan = _make_plan("venue_014", "rest_001", "zoo_plan")
-    kids_plan = _make_plan("venue_018", "rest_001", "kids_plan")
+    # Zoo closes at 17:30; planner would have set opening_fit=0.0 for a 19:00 activity
+    zoo_plan = _make_plan("venue_014", "rest_001", "zoo_plan", opening_fit=0.0)
+    # Kids playground open until 22:00; planner sets opening_fit=1.0
+    kids_plan = _make_plan("venue_018", "rest_001", "kids_plan", opening_fit=1.0)
 
-    zoo_scored = score_plan(
-        zoo_plan, 15.0, 4.0,
-        activity_start_time="19:00", activity_end_time="21:00",
-    )
-    kids_scored = score_plan(
-        kids_plan, 15.0, 4.0,
-        activity_start_time="19:00", activity_end_time="21:00",
-    )
+    zoo_scored = score_plan(zoo_plan, 15.0, 4.0)
+    kids_scored = score_plan(kids_plan, 15.0, 4.0)
 
     assert kids_scored.score > zoo_scored.score, (
-        f"Kids playground (open at 19:00) should beat zoo (closed at 17:30); "
+        f"Kids playground (opening_fit=1.0) should beat zoo (opening_fit=0.0); "
         f"kids={kids_scored.score:.3f}, zoo={zoo_scored.score:.3f}"
     )
+    assert zoo_scored.score == 0.0, f"Zoo plan with opening_fit=0.0 must score 0; got {zoo_scored.score}"
+    assert not zoo_scored.feasible, "Zoo plan with opening_fit=0.0 must be infeasible"

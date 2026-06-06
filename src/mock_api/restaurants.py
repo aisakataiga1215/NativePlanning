@@ -635,3 +635,15 @@ def search_restaurants(
 
 def get_coupons_for(target_id: str) -> list[Coupon]:
     return [c for c in COUPONS if c.target_id == target_id and c.available]
+
+
+def search_restaurants_any_location(
+    group_size: int,
+    preferences: list[str],
+) -> list[Restaurant]:
+    """Search all restaurants by preference tags, regardless of venue proximity."""
+    if preferences:
+        results = [r for r in RESTAURANTS if any(p in r.tags for p in preferences)]
+    else:
+        results = list(RESTAURANTS)
+    return sorted(results, key=lambda r: (-r.rating, r.queue_minutes))

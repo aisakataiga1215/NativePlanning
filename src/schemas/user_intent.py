@@ -159,6 +159,14 @@ class UserIntent(BaseModel):
         default="medium",
         description="Overall budget tier for the outing.",
     )
+    meal_policy: Literal["required", "optional", "excluded"] = Field(
+        default="required",
+        description="Meal arrangement policy: required=always plan a meal, optional=skip if no good match, excluded=do not arrange any meal.",
+    )
+    plan_mode: Literal["activity_first", "meal_first", "meal_only"] = Field(
+        default="activity_first",
+        description="Planning mode: activity_first=normal, meal_first=meal is primary goal, meal_only=only search restaurants.",
+    )
     special_constraints: list[str] = Field(
         default_factory=list,
         description="Free-form constraints not covered by structured fields.",

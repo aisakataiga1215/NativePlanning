@@ -81,6 +81,10 @@ def _trace_summary(trace: dict) -> str:
     return _truncate(output)
 
 
+def _fmt_elapsed(ms: float) -> str:
+    return "<1ms" if ms < 1 else f"{ms:.1f}ms"
+
+
 def _status_icon(status: str) -> str:
     if status == "ok":
         return "✓"
@@ -112,7 +116,7 @@ def _render_header() -> None:
         st.warning(
             f"LLM 不可用 — openai={'已安装' if _openai_ok else '**未安装**'}，"
             f"OPENAI_API_KEY={'已设置' if _key_ok else '**未设置**'}。  \n"
-            f"请用 conda env 启动：`E:/miniforge/envs/agent/Scripts/streamlit.exe run src/ui/app.py`  \n"
+            f"请用 conda env 启动：`E:/miniforge/envs/common/Scripts/streamlit.exe run src/ui/app.py`  \n"
             f"完整路径：`{sys.executable}`"
         )
 
@@ -147,6 +151,14 @@ def _render_intent_panel(generate: GenerateResponse) -> None:
         budget_lbl = _BUDGET_LABEL.get(intent.budget_preference, intent.budget_preference)
         st.markdown(f"💰 预算偏好：**{budget_lbl}**")
 
+        _MEAL_POLICY_LABEL = {
+            "excluded": "不安排餐饮",
+            "optional": "有合适再安排",
+            "required": "按需安排",
+        }
+        meal_pol = getattr(intent, "meal_policy", "required")
+        st.markdown(f"🍽 餐饮：**{_MEAL_POLICY_LABEL.get(meal_pol, meal_pol)}**")
+
         if intent.location_anchor:
             st.markdown(f"📍 **位置锚点：** {intent.location_anchor}")
         if intent.raw_input:
@@ -156,6 +168,31 @@ def _render_intent_panel(generate: GenerateResponse) -> None:
 def _render_warnings(warnings: list[str]) -> None:
     for warning in warnings:
         st.warning(warning)
+
+
+def _render_right_column(
+    col,
+    positive_tags: list[str],
+    negative_tags: list[str],
+    specialty_tags: list[str],
+    coupons: list,
+    packages: list,
+    suitable_for: str = "",
+) -> None:
+    with col:
+        if positive_tags:
+            st.caption("✅ " + "  ".join(f"`{t}`" for t in positive_tags[:3]))
+        if negative_tags:
+            st.caption("⚠️ " + "  ".join(f"`{t}`" for t in negative_tags[:2]))
+        if specialty_tags:
+            st.caption("⭐ " + "  ".join(f"`{t}`" for t in specialty_tags[:2]))
+        for c in coupons[:1]:
+            if c.available:
+                st.caption(f"🎟 {c.title}")
+        for p in packages[:1]:
+            st.caption(f"📦 {p.title}")
+        if suitable_for:
+            st.caption(f"👥 适合：{suitable_for}")
 
 
 def _render_plan_card(plan: ItineraryPlan, group_size: int = 1) -> None:
@@ -224,30 +261,27 @@ def _render_plan_card(plan: ItineraryPlan, group_size: int = 1) -> None:
             st.markdown("---")
             vcols = st.columns(2)
             with vcols[0]:
-                st.markdown(
-                    f"**{venue.name}**  ·  {venue.rating}⭐ ({venue.review_count} 评)"
-                )
-                st.caption(
-                    f"🕐 {venue.open_time} – {venue.close_time}  ·  "
-                    f"⏱ {venue.suggested_duration_min}–{venue.suggested_duration_max} 分钟"
-                )
-                if venue.specialty_tags:
-                    st.markdown("**亮点：** " + "  ".join(f"`{t}`" for t in venue.specialty_tags[:2]))
-                if venue.venue_coupons:
-                    for c in venue.venue_coupons[:1]:
-                        if c.available:
-                            st.success(f"🎫 {c.title}")
+                st.markdown(f"**{venue.name}**  ·  {venue.rating}⭐ ({venue.review_count} 评)")
+                st.caption(f"🕐 {venue.open_time} – {venue.close_time}")
+                st.caption(f"⏱ {venue.suggested_duration_min}–{venue.suggested_duration_max} 分钟")
+                if venue.price_per_person:
+                    st.caption(f"💰 ¥{venue.price_per_person:.0f}/人")
+                if venue.queue_minutes > 0:
+                    st.caption(f"⏳ 排队约 {venue.queue_minutes} 分钟")
                 if venue.ticket_options:
                     st.markdown("**票种：**")
                     for t in venue.ticket_options:
                         if t.available:
                             note_str = f" — {t.note}" if t.note else ""
                             st.markdown(f"- {t.type}: ¥{t.price:.0f}{note_str}")
-            with vcols[1]:
-                if venue.positive_review_tags:
-                    st.markdown("**好评：** " + "  ".join(f"`{t}`" for t in venue.positive_review_tags[:3]))
-                if venue.negative_review_tags:
-                    st.caption(f"⚠️ 风险：{' / '.join(venue.negative_review_tags[:2])}")
+            _render_right_column(
+                vcols[1],
+                positive_tags=venue.positive_review_tags,
+                negative_tags=venue.negative_review_tags,
+                specialty_tags=venue.specialty_tags,
+                coupons=venue.venue_coupons,
+                packages=venue.packages,
+            )
 
         # multi-stop: extra venues
         if len(plan.venue_ids) > 1:
@@ -269,26 +303,24 @@ def _render_plan_card(plan: ItineraryPlan, group_size: int = 1) -> None:
             st.markdown("---")
             rcols = st.columns(2)
             with rcols[0]:
-                st.markdown(
-                    f"**{restaurant.name}**  ·  {restaurant.rating}⭐ ({restaurant.review_count} 评)"
-                )
+                st.markdown(f"**{restaurant.name}**  ·  {restaurant.rating}⭐ ({restaurant.review_count} 评)")
                 st.caption(f"🕐 {restaurant.open_time} – {restaurant.close_time}")
+                if getattr(restaurant, "suggested_meal_duration_min", 0):
+                    st.caption(f"⏱ 约 {restaurant.suggested_meal_duration_min} 分钟")
+                if restaurant.avg_price_per_person:
+                    st.caption(f"💰 人均约 ¥{restaurant.avg_price_per_person:.0f}")
                 if restaurant.queue_minutes > 0:
                     st.caption(f"⏳ 排队约 {restaurant.queue_minutes} 分钟")
                 if restaurant.recommended_dishes:
                     st.markdown(f"**推荐菜：** {' · '.join(restaurant.recommended_dishes[:3])}")
-                if restaurant.positive_review_tags:
-                    st.markdown("**好评：** " + "  ".join(f"`{t}`" for t in restaurant.positive_review_tags[:3]))
-            with rcols[1]:
-                if restaurant.negative_review_tags:
-                    st.caption(f"⚠️ 风险：{' / '.join(restaurant.negative_review_tags[:2])}")
-                if restaurant.restaurant_coupons:
-                    for c in restaurant.restaurant_coupons[:2]:
-                        if c.available:
-                            st.success(f"🎫 {c.title}")
-                if restaurant.packages:
-                    for p in restaurant.packages[:1]:
-                        st.info(f"📦 {p.title} ¥{p.price:.0f}（原价 ¥{p.original_price:.0f}）")
+            _render_right_column(
+                rcols[1],
+                positive_tags=restaurant.positive_review_tags,
+                negative_tags=restaurant.negative_review_tags,
+                specialty_tags=restaurant.specialty_tags,
+                coupons=restaurant.restaurant_coupons,
+                packages=restaurant.packages,
+            )
 
 
 def _render_timeline(plan: ItineraryPlan) -> None:
@@ -340,7 +372,7 @@ def _render_trace_expander(traces: list[dict]) -> None:
                 "工具": trace.get("tool_name", ""),
                 "状态": _status_icon(trace.get("status", "")),
                 "摘要": _trace_summary(trace),
-                "耗时(ms)": trace.get("elapsed_ms", 0),
+                "耗时": _fmt_elapsed(trace.get("elapsed_ms", 0)),
             }
             for trace in traces
         ]

@@ -2,9 +2,9 @@
 
 ## 0. Environment
 
-- Python: `E:\miniforge\envs\agent\python.exe`
-- Run tests: `E:\miniforge\envs\agent\python.exe -m pytest tests/ -q`
-- Run Streamlit: `E:\miniforge\envs\agent\Scripts\streamlit.exe run src/ui/app.py`
+- Python: `E:\miniforge\envs\common\python.exe`
+- Run tests: `E:\miniforge\envs\common\python.exe -m pytest tests/ -q`
+- Run Streamlit: `E:\miniforge\envs\common\Scripts\streamlit.exe run src/ui/app.py`
 
 ## 1. Project Goal
 

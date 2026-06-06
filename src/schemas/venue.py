@@ -156,3 +156,17 @@ class Venue(BaseModel):
         description="Discount coupons available for this venue.",
     )
     ticket_options: list[TicketOption] = Field(default_factory=list)
+
+    # --- MVP-4.6: destination venues ---
+    is_destination: bool = Field(
+        default=False,
+        description="True for full-day venues like zoo/theme_park where guests spend the entire outing.",
+    )
+    onsite_meal_available: bool = Field(
+        default=False,
+        description="True if the venue has onsite dining options (e.g., park restaurant).",
+    )
+    nearby_meal_area: str = Field(
+        default="",
+        description="Description of the nearby dining area, e.g. '动物园东门餐饮区'.",
+    )

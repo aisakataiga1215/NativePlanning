@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from src.schemas.plan import ItineraryPlan, ScoreBreakdown
 from src.schemas.user_intent import Participant
-from src.services.opening_hours import is_open_during
 
 _WEIGHTS = {
     "distance_score": 0.25,
@@ -138,7 +137,8 @@ def score_plan(
         venue_identifiers = set(venue.tags) | {venue.type}
         if venue_identifiers & (venue_types_mapped | set(requested_activities)):
             group_fit_score = max(group_fit_score, 0.6)  # honor explicit > participant_fit
-            explicit_bonus = 0.15
+            explicit_bonus = 0.30
+            distance_score = max(distance_score, 0.50)  # floor: prevent distance from killing explicit plans
 
     # Priority 2: hard_constraint penalty
     constraint_penalty = 0.0
@@ -171,30 +171,6 @@ def score_plan(
     if plan.scenario_type == "colleagues":
         if venue and hasattr(venue, "noise_level") and venue.noise_level == "loud":
             constraint_penalty += 0.10
-
-    # opening hours penalty: primary venue must be open for the full activity step
-    # If explicit activity_start/end times were supplied, use them; otherwise derive
-    # from this plan's own primary activity step (related_entity_id == primary venue).
-    if venue:
-        oh_start = activity_start_time
-        oh_end = activity_end_time
-        if not (oh_start and oh_end):
-            primary_step = next(
-                (
-                    s for s in plan.steps
-                    if s.step_type == "activity" and s.related_entity_id == plan.venue_id
-                ),
-                None,
-            )
-            if primary_step is not None:
-                oh_start = primary_step.start_time
-                oh_end = primary_step.end_time
-        if oh_start and oh_end:
-            if not is_open_during(
-                venue.open_time, venue.close_time,
-                oh_start, oh_end,
-            ):
-                constraint_penalty += 0.35
 
     # location_anchor bonus
     anchor_bonus = 0.0
@@ -243,10 +219,12 @@ def score_plan(
         - constraint_penalty
     ))
 
-    return plan.model_copy(update={
-        "score": round(aggregate, 3),
-        "score_breakdown": breakdown,
-    })
+    opening_fit = getattr(plan, "opening_fit", 1.0)
+    final_score = round(opening_fit * aggregate, 3)
+    update: dict = {"score": final_score, "score_breakdown": breakdown}
+    if opening_fit == 0.0:
+        update["feasible"] = False
+    return plan.model_copy(update=update)
 
 
 def rank_plans(
@@ -260,6 +238,7 @@ def rank_plans(
     requested_meals: list[str] | None = None,
     activity_start_time: str = "",
     activity_end_time: str = "",
+    pinned_venue_ids: list[str] | None = None,
 ) -> list[ItineraryPlan]:
     scored = [
         score_plan(
@@ -270,4 +249,19 @@ def rank_plans(
         )
         for p in plans
     ]
-    return sorted(scored, key=lambda p: -p.score)
+    ranked = sorted(scored, key=lambda p: -p.score)
+    feasible_ranked   = [p for p in ranked if p.feasible]
+    infeasible_ranked = [p for p in ranked if not p.feasible]
+    ranked = feasible_ranked + infeasible_ranked
+    if pinned_venue_ids:
+        pinned = [p for p in ranked if p.venue_id in pinned_venue_ids and p.feasible]
+        others = [p for p in ranked if p not in pinned]
+        ranked = pinned + others
+    return ranked
+
+
+def get_explicit_venue_ids(requested_activities: list[str]) -> list[str]:
+    """Return IDs of venues whose type matches any of the requested activity types."""
+    from src.mock_api.venues import VENUES
+    target_types = {vt for ra in requested_activities for vt in _ACTIVITY_TYPE_MAP.get(ra, [ra])}
+    return [v.id for v in VENUES if v.type in target_types]
