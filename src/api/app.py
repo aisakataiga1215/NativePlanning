@@ -81,6 +81,7 @@ async def generate(request: GenerateRequest) -> GenerateResponse:
         location_anchor=intent.location_anchor,
         requested_meals=intent.requested_meals or None,
         pinned_venue_ids=_pinned or None,
+        soft_preferences=intent.soft_preferences or None,
     )
     best = ranked[0]
     return GenerateResponse(
@@ -135,6 +136,7 @@ async def revise(request: ReviseRequest) -> GenerateResponse:
         location_anchor=updated_intent.location_anchor,
         requested_meals=updated_intent.requested_meals or None,
         pinned_venue_ids=_pinned_r or None,
+        soft_preferences=updated_intent.soft_preferences or None,
     )
     best = ranked[0]
     return GenerateResponse(

@@ -270,3 +270,52 @@ def test_execute_no_restaurant_skips_reserve():
     assert "reserve_restaurant" not in action_types, (
         f"reserve_restaurant must not execute when restaurant_id is None, got {action_types}"
     )
+
+
+# ── Phase 4 regression: share_message + required_actions clean for no-meal ────
+
+def test_share_message_excludes_restaurant_info():
+    """Zoo + no_meal plan: template share message must not mention restaurant keywords."""
+    from unittest.mock import patch
+    from src.workflow.message_agent import generate_share_message
+
+    intent = _make_intent(requested_activities=["zoo"], meal_policy="excluded")
+    plan = ItineraryPlan(
+        id="share_test",
+        title="Zoo No Meal",
+        scenario_type="family",
+        summary="Zoo visit only",
+        steps=[
+            PlanStep(
+                step_type="activity",
+                title="参观动物园",
+                location_name="动物园",
+                start_time="10:00",
+                end_time="14:00",
+                duration_minutes=240,
+                related_entity_id="venue_014",
+            ),
+        ],
+        estimated_total_cost=0.0,
+        total_duration_minutes=240,
+        score=0.7,
+        score_breakdown=ScoreBreakdown(
+            distance_score=0.7, time_score=0.7, group_fit_score=0.7,
+            restaurant_score=0.5, execution_score=0.9,
+        ),
+        reasons=[],
+        risks=[],
+        required_actions=["book_venue"],
+        venue_id="venue_014",
+        restaurant_id=None,
+    )
+    with patch("src.workflow.message_agent._llm_message", return_value=None):
+        msg = generate_share_message(plan, [], intent)
+    for keyword in ("餐厅", "用餐", "预约"):
+        assert keyword not in msg.message, (
+            f"share_message must not mention '{keyword}': {msg.message!r}"
+        )
+    for action in plan.required_actions:
+        assert action not in ("reserve_restaurant", "order_food"), (
+            f"required_actions must not contain restaurant actions: {plan.required_actions}"
+        )

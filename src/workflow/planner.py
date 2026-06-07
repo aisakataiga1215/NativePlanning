@@ -215,6 +215,24 @@ def _generate_meal_only_plans(intent: UserIntent, log: TraceLog) -> list[Itinera
         ))
 
     feasible_plans = [p for p in plans if p.feasible]
+
+    # No-romantic fallback warning: if romantic intent but all feasible restaurants are business
+    _romantic_intent = any(p in ("romantic", "candlelight") for p in (intent.soft_preferences or []))
+    if _romantic_intent and feasible_plans:
+        from src.services.plan_ranker import _BUSINESS_TAGS
+        non_business = [
+            p for p in feasible_plans
+            if p.restaurant_id and not (
+                set(mock.get_restaurant(p.restaurant_id).tags) & _BUSINESS_TAGS
+            )
+        ]
+        if not non_business:
+            feasible_plans[0] = feasible_plans[0].model_copy(update={
+                "warnings": list(feasible_plans[0].warnings or []) + [
+                    "暂无完全匹配的烛光晚餐方案，建议17:00后出发以获得更佳体验"
+                ]
+            })
+
     return feasible_plans if feasible_plans else plans
 
 
@@ -254,10 +272,38 @@ def generate_plans(intent: UserIntent, log: TraceLog) -> list[ItineraryPlan]:
 
     venues = [v for v in venues if v.id not in intent.avoid_venue_ids]
 
-    # For evening family scenarios, reorder candidates to prefer night-viable child-friendly venues
     _start_min = time_to_minutes(intent.time) if intent.time else 0
-    if _start_min >= time_to_minutes("19:00") and intent.scenario_type in ("family", "kids"):
-        venues = sorted(venues, key=_night_family_score, reverse=True)
+
+    # Coarse pre-filter: remove venues already closed at departure time
+    if _start_min > 0:
+        _open_at_start = [
+            v for v in venues
+            if time_to_minutes(getattr(v, "close_time", "23:59")) > _start_min
+        ]
+        if _open_at_start:
+            venues = _open_at_start
+
+    # For evening family scenarios, reorder candidates to prefer night-viable child-friendly venues
+    _is_evening_family = (
+        _start_min >= time_to_minutes("18:00") and intent.scenario_type in ("family", "kids")
+    )
+    if _is_evening_family:
+        _arrival_approx = _start_min + 20  # 20-min typical travel estimate
+
+        def _evening_score(venue) -> float:
+            score = _night_family_score(venue)
+            close_min = time_to_minutes(getattr(venue, "close_time", "23:59"))
+            if close_min <= _arrival_approx:      # closed before arrival → strong downrank
+                score -= 10.0
+            if getattr(venue, "walk_intensity", "") == "high":
+                score -= 1.0
+            if "not_for_children" in getattr(venue, "tags", []):
+                score -= 3.0
+            return score
+
+        venues = sorted(venues, key=_evening_score, reverse=True)
+    else:
+        _evening_score = _night_family_score  # fallback, unused outside evening block
 
     # Boost venues that have nearby restaurants matching requested_meals
     if intent.requested_meals:
@@ -297,6 +343,30 @@ def generate_plans(intent: UserIntent, log: TraceLog) -> list[ItineraryPlan]:
         feasible_explicit = [p for p in explicit_plans if p.feasible]
         if feasible_explicit:
             return feasible_explicit[:1] + other_plans[:2]
+
+        # Evening-family: if all explicit plans infeasible, widen search for night-viable venues
+        if _is_evening_family and not feasible_explicit:
+            _wide_venues = traced_call(
+                "search_venues_evening_wide", mock.search_venues, log,
+                scenario_type=intent.scenario_type,
+                max_distance_km=effective_radius * 1.5,
+                tags=["night_available", "family", "kids"],
+            )
+            _wide_venues = [
+                v for v in _wide_venues
+                if v.id not in intent.avoid_venue_ids
+                and time_to_minutes(getattr(v, "close_time", "23:59")) > _start_min + 60
+            ]
+            _wide_venues = sorted(_wide_venues, key=_evening_score, reverse=True)
+            for _wv in _wide_venues[:5]:
+                if _wv.id in {v.id for v in explicit_candidates}:
+                    continue  # already tried
+                _wp = _build_one_plan(intent, _wv, _wide_venues, log)
+                if _wp and _wp.feasible:
+                    feasible_explicit.append(_wp)
+                    break
+            if feasible_explicit:
+                return feasible_explicit[:1] + other_plans[:2]
 
         # All explicit plans infeasible — add fallback warning to other plans
         if explicit_candidates:

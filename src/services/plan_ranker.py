@@ -46,6 +46,9 @@ _ACTIVITY_TYPE_MAP: dict[str, list[str]] = {
     "cycling":         ["cycling"],
 }
 
+_ROMANTIC_TAGS = frozenset({"romantic", "candlelight", "date", "couple"})
+_BUSINESS_TAGS  = frozenset({"business_casual", "colleagues", "not_too_private"})
+
 
 def _participant_venue_fit(p: Participant, venue) -> float:
     age = p.age if p.age is not None else _AGE_GROUP_MIDPOINTS.get(p.age_group, 30)
@@ -77,6 +80,7 @@ def score_plan(
     requested_meals: list[str] | None = None,
     activity_start_time: str = "",
     activity_end_time: str = "",
+    soft_preferences: list[str] | None = None,
 ) -> ItineraryPlan:
     from src.mock_api.venues import get_venue
     from src.mock_api.restaurants import get_restaurant
@@ -203,6 +207,23 @@ def score_plan(
         if tag_match or keyword_match:
             dishes_bonus += 0.10
 
+    # vibe_bonus / vibe_penalty: romantic vs business context
+    is_romantic_intent = (
+        plan.scenario_type == "couple"
+        or (soft_preferences and any(p in ("romantic", "candlelight") for p in soft_preferences))
+    )
+    vibe_bonus = 0.0
+    vibe_penalty = 0.0
+    if restaurant and is_romantic_intent:
+        if set(restaurant.tags) & _ROMANTIC_TAGS:
+            vibe_bonus += 0.15
+        if "western" in (restaurant.tags or []) and plan.scenario_type == "couple":
+            vibe_bonus += 0.05
+        if set(restaurant.tags) & _BUSINESS_TAGS:
+            vibe_penalty += 0.25
+        if any("双人" in p.title or "烛光" in p.title for p in (restaurant.packages or [])):
+            vibe_bonus += 0.05
+
     breakdown = ScoreBreakdown(
         distance_score=round(distance_score, 3),
         time_score=round(time_score, 3),
@@ -216,6 +237,8 @@ def score_plan(
         + anchor_bonus
         + promo_bonus
         + dishes_bonus
+        + vibe_bonus
+        - vibe_penalty
         - constraint_penalty
     ))
 
@@ -239,6 +262,7 @@ def rank_plans(
     activity_start_time: str = "",
     activity_end_time: str = "",
     pinned_venue_ids: list[str] | None = None,
+    soft_preferences: list[str] | None = None,
 ) -> list[ItineraryPlan]:
     scored = [
         score_plan(
@@ -246,6 +270,7 @@ def rank_plans(
             participants, requested_activities, hard_constraints,
             location_anchor, requested_meals,
             activity_start_time, activity_end_time,
+            soft_preferences=soft_preferences,
         )
         for p in plans
     ]
