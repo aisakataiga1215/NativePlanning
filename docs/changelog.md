@@ -2,6 +2,39 @@
 
 All meaningful project changes should be recorded in this file.
 
+## [TypeScript Frontend + Production Deployment] — 2026-06-08
+
+### Added
+
+- **`frontend/` (branch `feat/ts-frontend`)**: Next.js 14 App Router + TypeScript + Tailwind CSS single-page client
+  - 8 components: `IntentPanel`, `PlanCard`, `PlanSelector`, `Timeline`, `ToolTrace`, `ExecutionResult`, `ShareMessage`, `RevisionInput`
+  - State machine in `frontend/app/page.tsx`: `idle → generating → plan_ready → revising → executing → done`
+  - `frontend/lib/types.ts`: TypeScript interfaces mirroring all Pydantic schemas (`UserIntent`, `ItineraryPlan`, `PlanStep`, `ScoreBreakdown`, `ExecutionResult`, `ShareMessage`, `TraceEntry`, `GenerateResponse`, `ExecuteResponse`)
+  - `frontend/lib/api.ts`: thin `generate` / `revise` / `execute` HTTP client with typed responses
+  - `frontend/next.config.mjs`: dev proxy `/api/:path*` → `http://localhost:8000` (or `NEXT_PUBLIC_API_URL` in production)
+  - Brand color `#FF6900` (Meituan orange) via Tailwind theme extension
+  - Sample inputs (4 Chinese prompts) surfaced in the idle state
+- **Deployment artifacts**
+  - `Dockerfile` (Python 3.11-slim, exposes 7860, `uvicorn src.api.app:app`) for HuggingFace Spaces
+  - `render.yaml`: alternative Render web service config with `OPENAI_API_KEY` / `OPENAI_BASE_URL` env vars
+  - HuggingFace Spaces README config commit (`b8db6f1`, `2def55e`) and CORS middleware (`0d8de5d`)
+- **CORS middleware in `src/api/app.py`**: `allow_origins=["*"]`, `allow_methods=["*"]` so the Vercel-hosted frontend can call the HF Spaces backend
+- **Live URLs**
+  - Backend: https://aisakamai-nativeplanning.hf.space (HuggingFace Spaces, Docker)
+  - Frontend: https://native-planning.vercel.app (Vercel)
+
+### Verified
+
+- End-to-end generate / revise / execute flows confirmed working on the live URLs (production)
+- Streamlit UI remains deployed at https://nativeplanning.streamlit.app/ from `main`
+
+### Architecture
+
+- Both Streamlit and Next.js UIs share the same FastAPI backend and the same three endpoints. See [docs/architecture.md](architecture.md#7-frontend-topology) for the topology diagram.
+- TypeScript schemas are hand-maintained against `src/schemas/*.py` — no codegen yet.
+
+---
+
 ## [Final Submission] — 2026-06-07
 
 ### Added

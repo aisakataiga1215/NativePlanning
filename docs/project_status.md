@@ -2,12 +2,34 @@
 
 ## 1. Current Phase
 
-Current phase: **Final Submission / Deployment Ready**
+Current phase: **Production Deployed — TypeScript Frontend Live**
 
-Deployed at: https://nativeplanning.streamlit.app/
-GitHub: https://github.com/aisakataiga1215/NativePlanning
+Live URLs:
+- Next.js frontend (Vercel): https://native-planning.vercel.app
+- FastAPI backend (HuggingFace Spaces, Docker): https://aisakamai-nativeplanning.hf.space
+- Streamlit UI (Streamlit Community Cloud, `main` branch): https://nativeplanning.streamlit.app/
+- GitHub: https://github.com/aisakataiga1215/NativePlanning
 
 ## 2. Milestones
+
+### MVP-5: TypeScript Frontend + Production Deployment
+
+Status: **Complete** (2026-06-08)
+
+Delivered (branch `feat/ts-frontend`):
+- `frontend/`: Next.js 14 App Router + TypeScript + Tailwind CSS SPA
+- 8 components covering the full flow: `IntentPanel`, `PlanCard`, `PlanSelector`, `Timeline`, `ToolTrace`, `ExecutionResult`, `ShareMessage`, `RevisionInput`
+- State machine: `idle → generating → plan_ready → revising → executing → done`
+- `frontend/lib/types.ts`: TypeScript interfaces mirroring all Pydantic schemas
+- `frontend/lib/api.ts`: typed `generate` / `revise` / `execute` client; `next.config.mjs` dev proxy to FastAPI:8000
+- Brand color `#FF6900` (Meituan orange)
+- `Dockerfile` for HuggingFace Spaces (port 7860)
+- `render.yaml` alternative deployment recipe
+- CORS middleware added to `src/api/app.py`
+- E2E verified on production: generate, revise, execute flows all confirmed working
+- Streamlit UI on `main` continues to be the in-repo demo path
+
+See: [docs/architecture.md](architecture.md#7-frontend-topology) for the frontend + deployment topology.
 
 ### MVP-4.6: Bugfix & Data Consistency Pass
 
@@ -154,9 +176,12 @@ Tasks:
 ## 3. Current State
 
 - **321 tests passing**, 0 failed (no external API calls required)
-- Deployed: https://nativeplanning.streamlit.app/
+- Production deployed on three platforms:
+  - Next.js frontend: https://native-planning.vercel.app (Vercel)
+  - FastAPI backend: https://aisakamai-nativeplanning.hf.space (HuggingFace Spaces, Docker)
+  - Streamlit UI: https://nativeplanning.streamlit.app/ (Streamlit Community Cloud, `main`)
 - 8 demo acceptance cases verified end-to-end
-- Both in-process and HTTP backend modes functional
+- Both in-process and HTTP backend modes functional; Streamlit and Next.js share the same FastAPI endpoints
 - Rule-based fallback confirmed working without `OPENAI_API_KEY`
 
 ## 4. Known Limitations
@@ -165,10 +190,13 @@ Tasks:
 - Distance, queue time, and seat counts are simulated values
 - No real payment; booking returns a mock booking ID
 - Single session — no user login or persistent history
+- CORS is permissive (`allow_origins=["*"]`) — acceptable for the competition demo, not production
+- TypeScript schemas in `frontend/lib/types.ts` are hand-maintained against `src/schemas/*.py` (no codegen)
 
 ## 5. Next Steps (Post-Submission)
 
 - Real API integration (Meituan / Amap / queue / coupon)
-- Next.js + TypeScript frontend (Vercel)
+- Schema codegen from Pydantic to TypeScript to remove the manual mirror
 - SQLite persistence + user history
 - Multi-city expansion
+- Tighten CORS to known frontend origins
