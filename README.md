@@ -1,5 +1,9 @@
 # NativePlanning — Local Activity Planning Agent
 
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://nativeplanning.streamlit.app/)
+
+**Live Demo: https://nativeplanning.streamlit.app/**
+
 A local-life planning and execution agent that turns one natural language request into a
 complete, confirmed, executable 4–6 hour activity plan.
 
