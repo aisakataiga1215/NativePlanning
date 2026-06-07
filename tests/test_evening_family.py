@@ -123,16 +123,23 @@ def test_evening_family_not_closed_venue():
 
 
 def test_evening_family_night_viable_tags():
-    """Evening family outing → top venue must have night/family/kids tags."""
+    """Evening family outing → top venue must be indoor/kids type, not night_market."""
     from src.mock_api.venues import get_venue
     ranked, _ = _run_evening_family_chain()
     top = ranked[0]
     venue = get_venue(top.venue_id) if top.venue_id else None
-    venue_identifiers = set(getattr(venue, "tags", [])) | {getattr(venue, "type", "")}
-    assert venue_identifiers & _NIGHT_VIABLE_TAGS, (
-        f"ranked[0] venue must have night/family/kids tags; "
-        f"venue_id={top.venue_id!r}, type={getattr(venue, 'type', '')!r}, "
-        f"tags={getattr(venue, 'tags', [])!r}"
+    venue_type = getattr(venue, "type", "")
+    venue_tags = set(getattr(venue, "tags", []))
+    # Must have a kids/family/indoor signal
+    _KIDS_INDOOR_TAGS = frozenset({"kids", "parent_child", "family", "indoor", "indoor_kids_playground"})
+    assert (venue_tags & _KIDS_INDOOR_TAGS) or venue_type in ("indoor_kids_playground", "mall", "movie"), (
+        f"ranked[0] venue must be kids/indoor type (not night_market); "
+        f"venue_id={top.venue_id!r}, type={venue_type!r}, tags={list(venue_tags)!r}"
+    )
+    # Must NOT be a night_market/citywalk when kids venue is available
+    assert venue_type != "night_market", (
+        f"ranked[0] must not be night_market for a kids_playground request; "
+        f"venue_id={top.venue_id!r}"
     )
 
 
@@ -204,4 +211,60 @@ def test_threshold_18_triggers_evening_sort():
     # ranked[0] must itself be feasible
     assert ranked[0].feasible, (
         f"ranked[0] must be feasible at 18:00 start, got feasible={ranked[0].feasible!r}"
+    )
+
+
+# ── Phase 5: kids_playground type-based candidate selection ───────────────────
+
+def test_evening_kids_playground_prefers_indoor_kids_option():
+    """Evening kids_playground request must return indoor_kids_playground venue, not night_market."""
+    from src.mock_api.venues import get_venue
+    ranked, _ = _run_evening_family_chain()
+    assert ranked, "Must produce at least one plan"
+    top = ranked[0]
+    venue = get_venue(top.venue_id) if top.venue_id else None
+    venue_type = getattr(venue, "type", "")
+    assert venue_type != "night_market", (
+        f"Evening kids_playground request must not pick night_market as ranked[0]; "
+        f"got venue_id={top.venue_id!r}, type={venue_type!r}"
+    )
+    assert venue_type in ("indoor_kids_playground", "kids_playground", "mall", "movie"), (
+        f"ranked[0] must be an indoor/kids venue type; "
+        f"got venue_id={top.venue_id!r}, type={venue_type!r}"
+    )
+
+
+def test_evening_kids_playground_fallback_warning():
+    """When time makes kids venues infeasible, fallback warning about closed kids venues is added."""
+    # time="21:30" → venue_018 closes 22:00, arrival ~21:50, suggested_duration=120min → infeasible
+    # venue_001 closes 20:00 → infeasible. System must fall back with a warning.
+    intent = UserIntent(
+        scenario_type="family",
+        group_size=3,
+        time="21:30",
+        duration_hours=2.0,
+        max_distance_km=10.0,
+        requested_activities=["kids_playground"],
+    )
+    log = TraceLog()
+    plans = generate_plans(intent, log)
+    assert plans, "Must produce at least one plan even when kids venues are infeasible"
+    ranked = rank_plans(
+        plans,
+        intent.max_distance_km,
+        intent.duration_hours,
+        participants=intent.participants or None,
+        requested_activities=intent.requested_activities or None,
+        location_anchor=intent.location_anchor,
+    )
+    assert ranked, "rank_plans must return at least one plan"
+    top = ranked[0]
+    fallback_kw = "亲子乐园"
+    has_warning = any(
+        fallback_kw in w
+        for w in (top.warnings or [])
+    )
+    assert has_warning, (
+        f"Expected fallback warning mentioning '亲子乐园' when kids venues are all closed; "
+        f"warnings={top.warnings!r}, venue_id={top.venue_id!r}"
     )

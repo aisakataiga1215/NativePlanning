@@ -324,7 +324,31 @@ def generate_plans(intent: UserIntent, log: TraceLog) -> list[ItineraryPlan]:
             for ra in intent.requested_activities
             for vtype in _ACTIVITY_TYPE_MAP.get(ra, [ra])
         }
-        explicit_candidates = [v for v in venues if v.type in target_types]
+        _is_kids_request = any(
+            ra in ("kids_playground", "indoor_kids_playground")
+            for ra in intent.requested_activities
+        )
+        _avoid = set(intent.avoid_venue_ids)
+        # Search mock.VENUES directly by type — bypasses search_venues tag-only filter,
+        # which misses venues whose type matches but lack the literal tag (e.g., venue_018).
+        explicit_candidates = [
+            v for v in mock.VENUES
+            if v.type in target_types
+            and v.id not in _avoid
+            and getattr(v, "distance_km", 999) <= effective_radius
+        ]
+        # Apply same coarse pre-filter as the main venues list
+        if _start_min > 0:
+            _ec_open = [
+                v for v in explicit_candidates
+                if time_to_minutes(getattr(v, "close_time", "23:59")) > _start_min
+            ]
+            if _ec_open:
+                explicit_candidates = _ec_open
+        # For evening family scenarios, sort by evening score (indoor_kids_playground first)
+        if _is_evening_family and explicit_candidates:
+            explicit_candidates = sorted(explicit_candidates, key=_evening_score, reverse=True)
+
         other_candidates = [v for v in venues if v.type not in target_types]
 
         explicit_plans = [
@@ -366,13 +390,26 @@ def generate_plans(intent: UserIntent, log: TraceLog) -> list[ItineraryPlan]:
                     feasible_explicit.append(_wp)
                     break
             if feasible_explicit:
-                return feasible_explicit[:1] + other_plans[:2]
+                # Add kids-specific warning when falling back from a kids request
+                if _is_kids_request:
+                    kids_warn = "当前时间亲子乐园多数已闭园，已推荐夜间亲子友好的替代方案"
+                    feasible_explicit = [
+                        p.model_copy(update={"warnings": list(p.warnings) + [kids_warn]})
+                        for p in feasible_explicit
+                    ]
+                # Remove other_plans with same venue_id to prevent no-warning duplicate winning rank
+                fallback_ids = {p.venue_id for p in feasible_explicit}
+                other_plans_clean = [p for p in other_plans if p.venue_id not in fallback_ids]
+                return feasible_explicit[:1] + other_plans_clean[:2]
 
-        # All explicit plans infeasible — add fallback warning to other plans
-        if explicit_candidates:
-            fallback_warn = (
-                f"您要求的「{explicit_candidates[0].name}」当前时段无法安排，已推荐其他方案"
-            )
+        # All explicit plans infeasible — add kids-specific or generic fallback warning
+        if explicit_candidates or _is_kids_request:
+            if _is_kids_request:
+                fallback_warn = "当前时间亲子乐园多数已闭园，已推荐夜间亲子友好的替代方案"
+            else:
+                fallback_warn = (
+                    f"您要求的「{explicit_candidates[0].name}」当前时段无法安排，已推荐其他方案"
+                )
             other_plans = [
                 p.model_copy(update={"warnings": list(p.warnings) + [fallback_warn]})
                 for p in other_plans
