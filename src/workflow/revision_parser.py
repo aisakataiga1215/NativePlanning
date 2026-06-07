@@ -20,6 +20,16 @@ def _contains(text: str, keywords: list[str]) -> bool:
     return any(kw in text for kw in keywords)
 
 
+_EXCLUDED_MEAL = (
+    "不吃饭", "不用吃饭", "不安排吃的", "不要餐厅", "饭我自己解决",
+    "不需要餐厅", "不用管吃", "自己解决吃饭", "只安排玩", "只玩不吃",
+    "吃饭自己解决",
+)
+_OPTIONAL_MEAL = (
+    "随便吃点", "可吃可不吃", "有合适的再吃", "吃不吃无所谓", "顺便吃点",
+)
+
+
 def apply_revision(
     intent: UserIntent,
     revision_text: str,
@@ -161,5 +171,26 @@ def apply_revision(
     # "换个区域" / "换个方向" → clear anchor without implying venue change
     if _contains(text, ["换个区域", "换个方向", "不用在那边"]):
         updates["location_anchor"] = ""
+
+    # --- raw_input context accumulation ---
+    original_raw = intent.raw_input or ""
+    if revision_text and revision_text not in original_raw:
+        updates["raw_input"] = f"{original_raw}；补充：{revision_text}"
+
+    # --- meal policy update ---
+    if _contains(text, _EXCLUDED_MEAL):
+        updates["meal_policy"] = "excluded"
+        # Only promote to meal_policy_only when no other constraint changed
+        # (distance, budget, hard_constraints etc. → global re-plan needed)
+        _only_meal_changed = not any(k in updates for k in (
+            "max_distance_km", "budget_preference", "hard_constraints",
+            "soft_preferences", "requested_activities", "requested_meals",
+            "location_anchor",
+        ))
+        if _only_meal_changed and updates.get("revision_scope") == "":
+            updates["revision_scope"] = "meal_policy_only"
+    elif _contains(text, _OPTIONAL_MEAL):
+        updates["meal_policy"] = "optional"
+        # optional → full re-plan (revision_scope stays "")
 
     return intent.model_copy(update=updates)

@@ -29,7 +29,7 @@ from src.workflow.constraint_solver import validate_and_repair
 from src.workflow.executor import execute_plan
 from src.workflow.intent_parser import parse_free_text
 from src.workflow.message_agent import generate_share_message
-from src.workflow.planner import generate_plans, revise_restaurant_only, revise_venue_only
+from src.workflow.planner import generate_plans, revise_meal_policy_only, revise_restaurant_only, revise_venue_only
 from src.workflow.revision_parser import apply_revision
 
 _DEFAULT_HTTP_TIMEOUT_SECONDS = 30.0
@@ -96,14 +96,19 @@ class InProcessClient:
         log = TraceLog()
         updated_intent = apply_revision(intent, revision_text, current_plan)
         scope = updated_intent.revision_scope
+        venue_pin: list[str] = []
         if scope == "restaurant_only" and current_plan:
             plans = revise_restaurant_only(updated_intent, current_plan, log)
         elif scope == "venue_only" and current_plan:
             plans = revise_venue_only(updated_intent, current_plan, log)
+        elif scope == "meal_policy_only" and current_plan:
+            venue_pin = [current_plan.venue_id] if current_plan.venue_id else []
+            plans = revise_meal_policy_only(updated_intent, current_plan, log)
         else:
             plans = generate_plans(updated_intent, log)
         repaired = [validate_and_repair(p, updated_intent, log) for p in plans]
-        _pinned_r = get_explicit_venue_ids(updated_intent.requested_activities) if updated_intent.requested_activities else None
+        _explicit = get_explicit_venue_ids(updated_intent.requested_activities) if updated_intent.requested_activities else []
+        _pinned_r = list(dict.fromkeys(_explicit + venue_pin)) or None
         ranked = rank_plans(
             repaired, updated_intent.max_distance_km, updated_intent.duration_hours,
             participants=updated_intent.participants or None,

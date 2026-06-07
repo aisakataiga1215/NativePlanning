@@ -426,6 +426,8 @@ def _build_one_plan(
         reasons = [
             f"{primary_venue.name} 评分 {primary_venue.rating}，适合{_group_label(intent.scenario_type)}"
         ]
+        if meal_policy == "excluded":
+            reasons.append("已按要求不安排餐饮")
         non_travel = [s for s in steps if s.step_type not in ("travel", "return")]
         rest_id_part = dest_restaurant.id if dest_restaurant else "no_rest"
         dest_plan = ItineraryPlan(
@@ -891,3 +893,15 @@ def _required_actions(venue, restaurant) -> list[str]:
     if restaurant and restaurant.reservation_available:
         actions.append("reserve_restaurant")
     return actions
+
+
+def revise_meal_policy_only(
+    intent: UserIntent,
+    current_plan: ItineraryPlan,
+    log: TraceLog,
+) -> list[ItineraryPlan]:
+    """Re-plan with meal excluded, pinned to the original venue.
+
+    Caller must merge current_plan.venue_id into pinned_venue_ids when calling rank_plans.
+    """
+    return generate_plans(intent, log)

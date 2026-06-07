@@ -249,10 +249,11 @@ def rank_plans(
         )
         for p in plans
     ]
-    ranked = sorted(scored, key=lambda p: -p.score)
-    feasible_ranked   = [p for p in ranked if p.feasible]
-    infeasible_ranked = [p for p in ranked if not p.feasible]
-    ranked = feasible_ranked + infeasible_ranked
+    ranked = sorted(scored, key=lambda p: (
+        0 if p.feasible else 1,       # feasible before infeasible
+        0 if p.score > 0.05 else 1,   # high-quality before near-zero
+        -p.score,                      # descending score within each tier
+    ))
     if pinned_venue_ids:
         pinned = [p for p in ranked if p.venue_id in pinned_venue_ids and p.feasible]
         others = [p for p in ranked if p not in pinned]

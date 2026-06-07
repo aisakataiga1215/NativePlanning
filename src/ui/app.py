@@ -481,6 +481,9 @@ def main() -> None:
     _render_intent_panel(generate)
     _render_warnings(generate.warnings)
 
+    if not generate.plan.feasible or generate.plan.score <= 0.05:
+        st.warning("⚠️ 当前未找到完全匹配的方案，以下为最接近推荐")
+
     # Plan selector — only shown when there are alternatives
     all_plans = [generate.plan] + list(generate.alternatives)
     if len(all_plans) > 1:
@@ -499,6 +502,9 @@ def main() -> None:
         idx = 0
 
     selected_plan = all_plans[idx]
+
+    if not selected_plan.feasible:
+        st.caption("🔴 此方案存在约束冲突（如营业时间），仅供参考")
 
     _render_plan_card(selected_plan, group_size=generate.intent.group_size)
     _render_timeline(selected_plan)
