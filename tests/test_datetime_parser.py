@@ -50,7 +50,7 @@ def test_30_hao_bangwan():
     r = parse_date_time("30号傍晚想去吃饭", now=NOW)
     assert r.date == "2026-06-30"
     assert r.time_period == "evening"
-    assert r.start_time == "17:00"
+    assert r.start_time == "18:00"
 
 
 def test_day_of_month_past_rolls_to_next_month():
@@ -121,7 +121,7 @@ def test_wanshang():
 def test_bangwan():
     r = parse_date_time("傍晚散步", now=NOW)
     assert r.time_period == "evening"
-    assert r.start_time == "17:00"
+    assert r.start_time == "18:00"
 
 
 def test_no_time_period_defaults_to_unknown():

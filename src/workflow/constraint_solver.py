@@ -6,6 +6,33 @@ from src.tools.wrappers import TraceLog, traced_call
 from src.services.itinerary_builder import add_minutes, time_to_minutes
 import src.mock_api as mock
 
+_CUISINE_ALIAS_MAP: dict[str, set[str]] = {
+    "hotpot":   {"hotpot", "火锅", "麻辣锅"},
+    "japanese": {"japanese", "日料", "日本料理", "寿司", "居酒屋", "拉面"},
+    "western":  {"western", "西餐", "牛排"},
+    "bbq":      {"bbq", "烤肉"},
+    "coffee":   {"coffee", "咖啡", "轻食"},
+}
+_CUISINE_LABELS: dict[str, str] = {
+    "hotpot": "火锅", "japanese": "日料", "western": "西餐",
+    "bbq": "烤肉", "coffee": "咖啡",
+}
+
+
+def _restaurant_cuisine_key(restaurant) -> str | None:
+    tags = set(getattr(restaurant, "tags", []) or [])
+    for key, aliases in _CUISINE_ALIAS_MAP.items():
+        if aliases & tags:
+            return key
+    return None
+
+
+def _matches_cuisine_key(restaurant, key: str) -> bool:
+    aliases = _CUISINE_ALIAS_MAP.get(key, {key})
+    tags = set(getattr(restaurant, "tags", []) or [])
+    name = getattr(restaurant, "name", "")
+    return bool(aliases & tags) or any(len(a) > 1 and a in name for a in aliases)
+
 
 def validate_and_repair(
     plan: ItineraryPlan,
@@ -110,20 +137,44 @@ def _check_restaurant_seats(
     if avail.get("available"):
         return plan, False
 
-    warning = f"⚠ 餐厅 {plan.restaurant_id} 无空位，尝试切换备选餐厅"
+    orig_rest = mock.get_restaurant(plan.restaurant_id)
+    orig_name = orig_rest.name if orig_rest else plan.restaurant_id
 
-    # find alternative restaurant near same venue
-    alt_rests = traced_call(
-        "search_restaurants_alt", mock.search_restaurants, log,
+    cuisine_key = (
+        (_restaurant_cuisine_key(orig_rest) if orig_rest else None)
+        or (list(intent.requested_meals or [])[0] if intent.requested_meals else None)
+    )
+
+    all_near = traced_call(
+        "search_restaurants_alt_base", mock.search_restaurants, log,
         near_location=plan.venue_id or "venue_001",
         group_size=intent.group_size,
         preferences=[],
     )
-    alt_rests = [r for r in alt_rests if r.id != plan.restaurant_id and r.available_seats >= intent.group_size]
+    eligible = [r for r in all_near if r.id != plan.restaurant_id and r.available_seats >= intent.group_size]
 
-    if alt_rests:
-        alt = alt_rests[0]
-        warning += f"，已切换至「{alt.name}」"
+    same_alts = [r for r in eligible if cuisine_key and _matches_cuisine_key(r, cuisine_key)]
+
+    if same_alts:
+        alt, is_same_cuisine = same_alts[0], True
+    else:
+        cross_alts = [r for r in eligible if not (cuisine_key and _matches_cuisine_key(r, cuisine_key))]
+        alt = cross_alts[0] if cross_alts else (eligible[0] if eligible else None)
+        is_same_cuisine = False
+
+    if alt:
+        if is_same_cuisine:
+            warning = f"⚠ {orig_name} 暂无空位，已切换至同类餐厅「{alt.name}」"
+        elif cuisine_key:
+            clabel = _CUISINE_LABELS.get(cuisine_key, "")
+            warning = (
+                f"⚠ {orig_name} 暂无空位，{clabel}暂无同类可用，已切换至「{alt.name}」"
+                if clabel else
+                f"⚠ {orig_name} 暂无空位，已切换至「{alt.name}」"
+            )
+        else:
+            warning = f"⚠ {orig_name} 暂无空位，已切换至「{alt.name}」"
+
         updated_steps = [
             s.model_copy(update={
                 "title": f"在 {alt.name} 用餐" if s.step_type == "meal" else s.title,
@@ -131,14 +182,37 @@ def _check_restaurant_seats(
                 "related_entity_id": alt.id if s.step_type == "meal" else s.related_entity_id,
             }) for s in plan.steps
         ]
+
+        venue_name_for_title = next(
+            (s.location_name for s in plan.steps if s.step_type == "activity"), ""
+        )
+        if orig_rest and orig_name in plan.title:
+            new_title = plan.title.replace(orig_name, alt.name)
+        elif venue_name_for_title:
+            new_title = f"{venue_name_for_title} + {alt.name}"
+        else:
+            new_title = alt.name
+
+        if orig_rest and orig_name in plan.summary:
+            new_summary = plan.summary.replace(orig_name, alt.name)
+        else:
+            prefix = plan.summary.split("，")[0] if plan.summary else ""
+            new_summary = f"{prefix}，之后在 {alt.name} 用餐" if prefix else f"之后在 {alt.name} 用餐"
+
+        old_cost = (orig_rest.avg_price_per_person if orig_rest else 0) * intent.group_size
+        new_total = max(0.0, plan.estimated_total_cost - old_cost + alt.avg_price_per_person * intent.group_size)
+
         plan = plan.model_copy(update={
             "restaurant_id": alt.id,
             "steps": updated_steps,
+            "title": new_title,
+            "summary": new_summary,
+            "estimated_total_cost": round(new_total, 0),
             "warnings": plan.warnings + [warning],
         })
     else:
         plan = plan.model_copy(update={
-            "warnings": plan.warnings + [warning + "，暂无备选，建议自行安排用餐"],
+            "warnings": plan.warnings + [f"⚠ {orig_name} 暂无空位，暂无备选，建议自行安排用餐"],
             "required_actions": [a for a in plan.required_actions if a != "reserve_restaurant"],
         })
 

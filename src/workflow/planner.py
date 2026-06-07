@@ -33,6 +33,26 @@ _ADULT_DOWNRANK_TAGS = frozenset({"bar", "nightclub", "adult", "alcohol", "high_
 # Wait tolerance: push step start to open_time if wait is within this; else infeasible
 _WAIT_TOLERANCE_MIN = 30
 
+_MEAL_ALIAS_MAP: dict[str, set[str]] = {
+    "hotpot":   {"hotpot", "火锅", "麻辣锅"},
+    "japanese": {"japanese", "日料", "日本料理", "寿司", "居酒屋", "拉面"},
+    "western":  {"western", "西餐", "牛排"},
+    "bbq":      {"bbq", "烤肉"},
+    "coffee":   {"coffee", "咖啡", "轻食"},
+}
+
+
+def _restaurant_matches_meal(restaurant, meal_keys: list[str]) -> bool:
+    tags = set(getattr(restaurant, "tags", []) or [])
+    name = getattr(restaurant, "name", "")
+    for key in meal_keys:
+        aliases = _MEAL_ALIAS_MAP.get(key, {key})
+        if aliases & tags:
+            return True
+        if any(len(a) > 1 and a in name for a in aliases):
+            return True
+    return False
+
 
 def _night_family_score(venue) -> float:
     """Score venue suitability for evening family trips (higher = better)."""
@@ -216,6 +236,17 @@ def _generate_meal_only_plans(intent: UserIntent, log: TraceLog) -> list[Itinera
 
     feasible_plans = [p for p in plans if p.feasible]
 
+    # Sort feasible plans to prefer requested_meals type restaurants first
+    if feasible_plans and intent.requested_meals:
+        def _meal_type_match(mp):
+            r = mock.get_restaurant(mp.restaurant_id) if mp.restaurant_id else None
+            if not r:
+                return False
+            return any(m in (getattr(r, "tags", []) or []) for m in intent.requested_meals)
+        _meal_matched = [p for p in feasible_plans if _meal_type_match(p)]
+        _meal_others = [p for p in feasible_plans if not _meal_type_match(p)]
+        feasible_plans = _meal_matched + _meal_others
+
     # No-romantic fallback warning: if romantic intent but all feasible restaurants are business
     _romantic_intent = any(p in ("romantic", "candlelight") for p in (intent.soft_preferences or []))
     if _romantic_intent and feasible_plans:
@@ -246,7 +277,7 @@ def generate_plans(intent: UserIntent, log: TraceLog) -> list[ItineraryPlan]:
     """
     plan_mode   = getattr(intent, "plan_mode", "activity_first")
     meal_policy = getattr(intent, "meal_policy", "required")
-    if plan_mode == "meal_only" and meal_policy != "excluded":
+    if plan_mode == "meal_only" and not intent.requested_activities and meal_policy != "excluded":
         return _generate_meal_only_plans(intent, log)
 
     tags = (
@@ -307,10 +338,10 @@ def generate_plans(intent: UserIntent, log: TraceLog) -> list[ItineraryPlan]:
 
     # Boost venues that have nearby restaurants matching requested_meals
     if intent.requested_meals:
-        meal_tags = set(intent.requested_meals)
+        meal_keys = list(intent.requested_meals)
         def _has_meal_match(venue_id: str) -> bool:
             return any(
-                r.near_location == venue_id and any(t in r.tags for t in meal_tags)
+                r.near_location == venue_id and _restaurant_matches_meal(r, meal_keys)
                 for r in mock.RESTAURANTS
             )
         matching_m = [v for v in venues if _has_meal_match(v.id)]
@@ -331,11 +362,14 @@ def generate_plans(intent: UserIntent, log: TraceLog) -> list[ItineraryPlan]:
         _avoid = set(intent.avoid_venue_ids)
         # Search mock.VENUES directly by type — bypasses search_venues tag-only filter,
         # which misses venues whose type matches but lack the literal tag (e.g., venue_018).
-        explicit_candidates = [
+        _orig_explicit_candidates = [
             v for v in mock.VENUES
             if v.type in target_types
             and v.id not in _avoid
-            and getattr(v, "distance_km", 999) <= effective_radius
+        ]
+        explicit_candidates = [
+            v for v in _orig_explicit_candidates
+            if getattr(v, "distance_km", 999) <= effective_radius
         ]
         # Apply same coarse pre-filter as the main venues list
         if _start_min > 0:
@@ -351,18 +385,45 @@ def generate_plans(intent: UserIntent, log: TraceLog) -> list[ItineraryPlan]:
 
         other_candidates = [v for v in venues if v.type not in target_types]
 
-        explicit_plans = [
-            p
-            for v in explicit_candidates
-            for p in [_build_one_plan(intent, v, venues, log)]
-            if p is not None
-        ]
+        explicit_plans = []
+        for v in explicit_candidates:
+            p = _build_one_plan(intent, v, venues, log)
+            if p is None:
+                continue
+            if not p.feasible:
+                # Retry if venue opens soon (user arrived too early — e.g., zoo at 7am)
+                open_min = time_to_minutes(getattr(v, "open_time", "00:00"))
+                wait_needed = open_min - _start_min
+                if 0 < wait_needed <= 120:
+                    adj_intent = intent.model_copy(update={"time": getattr(v, "open_time", intent.time)})
+                    p2 = _build_one_plan(adj_intent, v, venues, log)
+                    if p2 and p2.feasible:
+                        adj_warn = f"{v.name} {v.open_time} 开门，已将出发时间调整为开园后入园"
+                        p = p2.model_copy(update={"warnings": list(p2.warnings or []) + [adj_warn]})
+            explicit_plans.append(p)
         other_plans = [
             p
             for v in other_candidates[:3]
             for p in [_build_one_plan(intent, v, venues, log)]
             if p is not None
         ]
+
+        # When all explicit candidates are too far and the general pool is also too small
+        # (very tight radius), widen the search so we can return at least one fallback plan.
+        if not explicit_candidates and _orig_explicit_candidates and not other_plans:
+            _wide_fallback = traced_call(
+                "search_venues_tooFar_wide", mock.search_venues, log,
+                scenario_type=intent.scenario_type,
+                max_distance_km=max(5.0, effective_radius),
+                tags=[],
+            )
+            _wide_others = [v for v in _wide_fallback if v.type not in target_types]
+            other_plans = [
+                p
+                for v in _wide_others[:3]
+                for p in [_build_one_plan(intent, v, _wide_fallback, log)]
+                if p is not None
+            ]
 
         feasible_explicit = [p for p in explicit_plans if p.feasible]
         if feasible_explicit:
@@ -402,16 +463,28 @@ def generate_plans(intent: UserIntent, log: TraceLog) -> list[ItineraryPlan]:
                 other_plans_clean = [p for p in other_plans if p.venue_id not in fallback_ids]
                 return feasible_explicit[:1] + other_plans_clean[:2]
 
-        # All explicit plans infeasible — add kids-specific or generic fallback warning
-        if explicit_candidates or _is_kids_request:
-            if _is_kids_request:
-                fallback_warn = "当前时间亲子乐园多数已闭园，已推荐夜间亲子友好的替代方案"
-            else:
-                fallback_warn = (
-                    f"您要求的「{explicit_candidates[0].name}」当前时段无法安排，已推荐其他方案"
-                )
+        # Determine fallback warning reason
+        _fallback_warn: str | None = None
+        if not explicit_candidates and _orig_explicit_candidates:
+            # All type-matching venues exceeded max_distance — too-far warning
+            _too_far_names = [getattr(v, "name", v.id) for v in _orig_explicit_candidates[:2]]
+            _too_far_km = max(getattr(v, "distance_km", 0) for v in _orig_explicit_candidates)
+            _fallback_warn = (
+                f"你想去的{'、'.join(_too_far_names)}距离较远（约{_too_far_km:.1f}km），"
+                f"已推荐附近替代方案"
+            )
+        elif _is_kids_request:
+            _fallback_warn = "当前时间亲子乐园多数已闭园，已推荐夜间亲子友好的替代方案"
+        elif explicit_candidates:
+            _act_labels = {"exhibition": "展览", "museum": "博物馆", "zoo": "动物园"}
+            _act_label = next(
+                (_act_labels[ra] for ra in (intent.requested_activities or []) if ra in _act_labels),
+                explicit_candidates[0].name if explicit_candidates else "该活动",
+            )
+            _fallback_warn = f"当前范围内无合适{_act_label}场所，已推荐替代方案"
+        if _fallback_warn:
             other_plans = [
-                p.model_copy(update={"warnings": list(p.warnings) + [fallback_warn]})
+                p.model_copy(update={"warnings": list(p.warnings) + [_fallback_warn]})
                 for p in other_plans
             ]
         return other_plans if other_plans else explicit_plans
@@ -471,6 +544,19 @@ def _build_one_plan(
             preferences=meal_prefs,
         )
         restaurants = [r for r in restaurants if r.id not in intent.avoid_restaurant_ids]
+
+        if intent.requested_meals and restaurants:
+            if not _restaurant_matches_meal(restaurants[0], list(intent.requested_meals)):
+                wider = traced_call(
+                    "search_restaurants_cuisine_wider", mock.search_restaurants_any_location, log,
+                    group_size=intent.group_size,
+                    preferences=list(intent.requested_meals),
+                )
+                avoid_ids = set(intent.avoid_restaurant_ids)
+                wider = [r for r in wider if r.id not in avoid_ids]
+                if wider:
+                    seen = {r.id for r in wider}
+                    restaurants = wider + [r for r in restaurants if r.id not in seen]
 
         if not restaurants:
             if meal_policy == "required":
@@ -560,7 +646,7 @@ def _build_one_plan(
         )
 
         # Apply unified opening-hours gate across all entity steps
-        return _apply_opening_hours_gate(dest_plan, all_venues)
+        return _reflow_steps(_apply_opening_hours_gate(dest_plan, all_venues))
     core_budget = travel_out + primary_dur_min + rest_travel + meal_min + return_est
     remaining = target_minutes - core_budget
 
@@ -652,7 +738,7 @@ def _build_one_plan(
     )
 
     # Apply unified opening-hours gate across all entity steps
-    return _apply_opening_hours_gate(plan, all_venues)
+    return _reflow_steps(_apply_opening_hours_gate(plan, all_venues))
 
 
 def _recalculate_steps_after_truncation(
@@ -708,6 +794,7 @@ def _compute_step_opening_fit(
     step_start: str,
     step_end: str,
     all_steps: list,
+    step_type: str = "activity",
 ) -> tuple[float, list, list[str]]:
     """Three-tier opening_fit for a single entity step.
 
@@ -745,7 +832,12 @@ def _compute_step_opening_fit(
         updated = _recalculate_steps_after_truncation(list(all_steps), entity_steps[-1], close_min)
     else:
         updated = all_steps
-    return 0.7, updated, [oh_warn]
+    lbl = "用餐" if step_type == "meal" else "活动"
+    adjust_warn = (
+        f"因营业时间限制，已将{lbl}时长调整为 {available_min} 分钟"
+        f"（{entity_name} {entity_open}–{entity_close}）"
+    )
+    return 0.7, updated, [adjust_warn]
 
 
 def _find_venue_by_id(vid: str, all_venues: list):
@@ -777,6 +869,7 @@ def _apply_opening_hours_gate(plan: ItineraryPlan, all_venues: list) -> Itinerar
                     venue.name, venue.open_time, venue.close_time,
                     venue.id, getattr(venue, "suggested_duration_min", 60),
                     step.start_time, step.end_time, updated_steps,
+                    step_type="activity",
                 )
                 if step_fit == 0.0:
                     infeasible_reasons.append(
@@ -792,6 +885,7 @@ def _apply_opening_hours_gate(plan: ItineraryPlan, all_venues: list) -> Itinerar
                     restaurant.id,
                     getattr(restaurant, "suggested_meal_duration_min", 60),
                     step.start_time, step.end_time, updated_steps,
+                    step_type="meal",
                 )
                 if step_fit == 0.0:
                     infeasible_reasons.append(
@@ -815,6 +909,61 @@ def _apply_opening_hours_gate(plan: ItineraryPlan, all_venues: list) -> Itinerar
         upd["feasible"] = False
         upd["infeasible_reasons"] = infeasible_reasons or ["一个或多个关键步骤超出营业时间"]
     return plan.model_copy(update=upd)
+
+
+def _reflow_steps(plan: ItineraryPlan) -> ItineraryPlan:
+    """Cascade steps forward without reordering; force return last; recalculate durations."""
+    if len(plan.steps) < 2:
+        return plan
+
+    def _dur(s_str: str, e_str: str, orig_dur: int) -> int:
+        d = time_to_minutes(e_str) - time_to_minutes(s_str)
+        if d < 0:
+            d += 24 * 60
+        return d if d > 0 else max(orig_dur, 1)
+
+    non_ret = [s for s in plan.steps if s.step_type != "return"]
+    ret_steps = [s for s in plan.steps if s.step_type == "return"]
+
+    reflowed: list = []
+    for s in non_ret:
+        if reflowed:
+            prev_end = time_to_minutes(reflowed[-1].end_time)
+            s_start  = time_to_minutes(s.start_time)
+            if s_start < prev_end:
+                dur = _dur(s.start_time, s.end_time, s.duration_minutes)
+                s = s.model_copy(update={
+                    "start_time": minutes_to_time(prev_end),
+                    "end_time":   minutes_to_time(prev_end + dur),
+                })
+        reflowed.append(s)
+
+    cur = time_to_minutes(reflowed[-1].end_time) if reflowed else 0
+    for rs in ret_steps:
+        rs_dur = _dur(rs.start_time, rs.end_time, rs.duration_minutes)
+        rs = rs.model_copy(update={
+            "start_time": minutes_to_time(cur),
+            "end_time":   minutes_to_time(cur + rs_dur),
+        })
+        reflowed.append(rs)
+        cur += rs_dur
+
+    final: list = []
+    for s in reflowed:
+        actual = _dur(s.start_time, s.end_time, s.duration_minutes)
+        if actual != s.duration_minutes:
+            s = s.model_copy(update={"duration_minutes": actual})
+        final.append(s)
+
+    if final:
+        span = time_to_minutes(final[-1].end_time) - time_to_minutes(final[0].start_time)
+        if span < 0:
+            span += 24 * 60
+        total_min = span
+    else:
+        total_min = plan.total_duration_minutes
+
+    return plan.model_copy(update={"steps": final, "total_duration_minutes": total_min})
 
 
 def _find_light_stop(primary_venue, all_venues: list, intent: UserIntent):

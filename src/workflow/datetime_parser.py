@@ -54,14 +54,16 @@ _MORNING_KEYWORDS = ["早上", "上午", "早晨", "早点", "一早"]
 _NOON_KEYWORDS = ["中午", "午饭", "午餐", "午间"]
 _AFTERNOON_KEYWORDS = ["下午", "午后"]
 _EVENING_KEYWORDS = ["傍晚", "黄昏", "日落"]
-_NIGHT_KEYWORDS = ["晚上", "夜里", "夜间", "晚间", "深夜", "夜晚"]
+_NIGHT_KEYWORDS = ["今晚", "晚上", "夜晚", "晚间"]
+_LATE_NIGHT_KEYWORDS = ["深夜", "夜里", "夜间"]
 
 _DEFAULT_START_TIMES = {
     "morning": "09:00",
     "noon": "12:00",
     "afternoon": "14:00",
-    "evening": "17:00",
+    "evening": "18:00",
     "night": "19:00",
+    "late_night": "21:00",
 }
 
 _UNKNOWN_START_TIME = "10:00"
@@ -243,6 +245,9 @@ def _resolve_time_period(text: str, now: datetime) -> tuple[str, str]:
 
     if any(token in text for token in _EVENING_KEYWORDS):
         return "evening", _DEFAULT_START_TIMES["evening"]
+
+    if any(token in text for token in _LATE_NIGHT_KEYWORDS):
+        return "late_night", _DEFAULT_START_TIMES["late_night"]
 
     if any(token in text for token in _NIGHT_KEYWORDS):
         return "night", _DEFAULT_START_TIMES["night"]

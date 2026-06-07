@@ -1,4 +1,6 @@
 """Tests for couple / candlelight meal ranking (Bug 2)."""
+from datetime import datetime
+
 import src.mock_api as mock
 from src.schemas.user_intent import UserIntent
 from src.services.plan_ranker import _ROMANTIC_TAGS, rank_plans
@@ -8,6 +10,7 @@ from src.workflow.planner import generate_plans
 
 
 _CANDLELIGHT_INPUT = "待会和老婆去吃烛光晚餐"
+_NOW = datetime(2026, 6, 7, 14, 0, 0)  # fixed 2pm — ensures western restaurants are open
 
 
 # ── Intent parser (rule-based) ────────────────────────────────────────────────
@@ -37,7 +40,7 @@ def test_candlelight_requested_meals_western():
 
 def _run_candlelight_chain(extra_intent_kwargs=None):
     """Parse candlelight input, generate + rank plans, return (ranked, intent)."""
-    intent = parse_free_text(_CANDLELIGHT_INPUT)
+    intent = parse_free_text(_CANDLELIGHT_INPUT, _now=_NOW)
     if extra_intent_kwargs:
         intent = intent.model_copy(update=extra_intent_kwargs)
     log = TraceLog()

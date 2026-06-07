@@ -54,7 +54,9 @@ _MEAL_REQUEST_MAP: dict[str, str] = {
     "烤肉":    "bbq",
     "日料":    "japanese",
     "日本料理": "japanese",
+    "寿司":    "japanese",
     "西餐":    "western",
+    "牛排":    "western",
     "咖啡":    "coffee",
     "奶茶":    "bubble_tea",
     "轻食":    "healthy_food",
@@ -348,6 +350,8 @@ def _extract_meal_policy(text: str) -> str:
 _MEAL_ONLY_KEYWORDS = (
     "去吃", "吃饭", "找餐厅", "吃个饭", "只想吃", "就是吃",
     "烛光晚餐", "吃晚饭", "吃点东西", "找个地方吃", "和老婆吃",
+    "吃火锅", "吃日料", "吃烤肉", "吃西餐", "吃寿司", "吃牛排",
+    "聚餐", "约饭", "搓一顿",
 )
 _ACTIVITY_EXPLICIT_KEYWORDS = (
     "动物园", "乐园", "公园", "博物馆", "看展", "电影",
