@@ -62,7 +62,7 @@ class ExecutionResult(BaseModel):
         ...,
         description="The action_type from the originating ExecutionAction.",
     )
-    status: Literal["success", "failed"] = Field(
+    status: Literal["success", "failed", "skipped"] = Field(
         ...,
         description="Terminal status of the executed action.",
     )

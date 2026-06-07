@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 
 from src.schemas.order import ExecutionResult, ShareMessage
 from src.schemas.plan import ItineraryPlan
@@ -138,6 +139,43 @@ def _llm_message(
     return None
 
 
+def _filter_warnings(
+    warnings: list[str],
+    current_restaurant_id: str | None,
+    current_venue_id: str | None,
+) -> list[str]:
+    """Keep fallback-explanation warnings; drop only stale entity-specific ones."""
+    import src.mock_api as mock
+    rest = mock.get_restaurant(current_restaurant_id) if current_restaurant_id else None
+    venue = mock.get_venue(current_venue_id) if current_venue_id else None
+    current_names = {
+        n for n in [getattr(rest, "name", None), getattr(venue, "name", None)] if n
+    }
+    kept = []
+    for w in warnings:
+        if "已切换至" in w:
+            kept.append(w)
+            continue
+        named = re.findall(r"「([^」]+)」", w)
+        if not named:
+            kept.append(w)
+            continue
+        if any(n in current_names for n in named):
+            kept.append(w)
+    return kept
+
+
+def _exec_context_note(results: list[ExecutionResult], has_meal: bool) -> str:
+    if not has_meal or not results:
+        return ""
+    rest_result = next(
+        (r for r in results if r.action_type == "reserve_restaurant"), None
+    )
+    if rest_result and rest_result.status in ("failed", "skipped"):
+        return "\n⚠ 餐厅预约未完成，请提前联系餐厅确认"
+    return ""
+
+
 def _template_message(
     plan: ItineraryPlan,
     results: list[ExecutionResult],
@@ -225,8 +263,10 @@ def _template_message(
             )
         receiver = "unknown"
 
-    if plan.warnings:
-        msg += "\n备注：" + "；".join(plan.warnings)
+    msg += _exec_context_note(results, has_meal)
+    filtered = _filter_warnings(plan.warnings or [], plan.restaurant_id, plan.venue_id)
+    if filtered:
+        msg += "\n备注：" + "；".join(filtered)
 
     return msg, receiver
 

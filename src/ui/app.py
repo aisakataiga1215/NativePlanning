@@ -36,6 +36,18 @@ from src.ui.planning_client import make_client
 
 _SUMMARY_TRUNCATE = 60
 
+_ACTION_LABELS: dict[str, str] = {
+    "book_venue": "门票预订",
+    "reserve_restaurant": "餐厅预约",
+    "order_food": "点餐/套餐",
+    "queue_restaurant": "排队取号",
+}
+_STATUS_LABELS: dict[str, str] = {
+    "success": "✅ 成功",
+    "failed":  "❌ 失败",
+    "skipped": "⏭ 跳过",
+}
+
 st.set_page_config(
     page_title="NativePlanning",
     page_icon="🗺️",
@@ -379,7 +391,28 @@ def _render_trace_expander(traces: list[dict]) -> None:
         st.dataframe(rows, hide_index=True, use_container_width=True)
 
 
-def _render_execution(execute: ExecuteResponse) -> None:
+def _build_exec_detail(result, plan, intent) -> str:
+    import src.mock_api as mock
+    ref = result.booking_id or result.order_id or ""
+    ref_str = f" 确认号：{ref}" if ref else ""
+    if result.action_type == "book_venue" and plan.venue_id:
+        v = mock.get_venue(plan.venue_id)
+        name = getattr(v, "name", plan.venue_id)
+        step = next((s for s in plan.steps if s.step_type == "activity"), None)
+        t = step.start_time if step else ""
+        n = getattr(intent, "group_size", 1)
+        return f"{name} · {n}张 · 入场 {t}{ref_str}" if t else f"{name} · {n}张{ref_str}"
+    if result.action_type == "reserve_restaurant" and plan.restaurant_id:
+        res = mock.get_restaurant(plan.restaurant_id)
+        name = getattr(res, "name", plan.restaurant_id)
+        step = next((s for s in plan.steps if s.step_type == "meal"), None)
+        t = step.start_time if step else ""
+        n = getattr(intent, "group_size", 1)
+        return f"{name} · {n}人 · {t}{ref_str}" if t else f"{name} · {n}人{ref_str}"
+    return result.message or ref_str.strip()
+
+
+def _render_execution(execute, plan, intent) -> None:
     with st.container(border=True):
         st.markdown("### 4. 执行结果")
         if not execute.results:
@@ -387,19 +420,26 @@ def _render_execution(execute: ExecuteResponse) -> None:
         else:
             rows = []
             for result in execute.results:
-                ref = result.booking_id or result.order_id or ""
-                detail = f"{result.message}  ({ref})" if ref else result.message
-                rows.append(
-                    {
-                        "操作": result.action_type,
-                        "状态": "✓ 成功" if result.status == "success" else "✗ 失败",
-                        "详情": detail,
-                    }
-                )
+                label = _ACTION_LABELS.get(result.action_type, result.action_type)
+                status = _STATUS_LABELS.get(result.status, result.status)
+                detail = _build_exec_detail(result, plan, intent)
+                rows.append({"操作": label, "状态": status, "详情": detail})
             st.dataframe(rows, hide_index=True, use_container_width=True)
 
         st.markdown("**分享消息**（点击右上角图标复制）")
         st.code(execute.share_message.message, language=None)
+
+        st.subheader("下一步提醒")
+        reminders = []
+        if any(r.action_type == "book_venue" and r.status == "success" for r in execute.results):
+            reminders.append("📋 查看门票确认信息，按时到场")
+        if any(r.action_type == "reserve_restaurant" and r.status == "success" for r in execute.results):
+            reminders.append("🍽 餐厅预约已确认，注意保留时间")
+        reminders.append("🪪 出行请携带证件")
+        if plan.warnings:
+            reminders.append("⚠ 查看行程备注，注意风险提示")
+        for rem in reminders:
+            st.write(rem)
 
 
 def _run_generate(user_input: str) -> None:
@@ -541,7 +581,7 @@ def main() -> None:
 
     execute: ExecuteResponse | None = st.session_state.get("last_execute")
     if execute is not None:
-        _render_execution(execute)
+        _render_execution(execute, selected_plan, generate.intent)
         _render_trace_expander(execute.traces)
 
 
