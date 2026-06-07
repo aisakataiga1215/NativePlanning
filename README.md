@@ -14,20 +14,20 @@ confirmation.
 ## Quick Start
 
 ```bash
-# 1. Activate the conda environment
-mamba activate E:\miniforge
-mamba activate agent
-
-# 2. Install core + optional deps
-cd NativePlanning
+# 1. Install dependencies
+pip install -r requirements.txt && pip install -e .
+# or with extras:
 pip install -e ".[api,ui]"        # FastAPI + Streamlit
-# or minimal:
 pip install -e ".[dev]"           # tests only
 
-# 3. (Optional) Configure LLM — any OpenAI-compatible provider
+# 2. (Optional) Configure LLM — any OpenAI-compatible provider
 cp .env.example .env
 # Set OPENAI_API_KEY, OPENAI_BASE_URL (DeepSeek), OPENAI_MODEL
 # Without a key the system falls back to rule-based intent parsing automatically
+
+# 3. Start Streamlit UI
+streamlit run src/ui/app.py
+# → http://localhost:8501
 ```
 
 ---
@@ -85,8 +85,8 @@ See [`docs/demo_script.md`](docs/demo_script.md) for the full judge demo walkthr
 ## Tests
 
 ```bash
-pytest tests/ -v
-# 91 passed in ~1 s — no OPENAI_API_KEY required
+pytest tests/ -q
+# 321 passed — no OPENAI_API_KEY required
 ```
 
 ---
@@ -115,9 +115,9 @@ See [`docs/architecture.md`](docs/architecture.md) for details.
 |-----------|--------|-------------|
 | MVP-0 | ✓ Complete | Deterministic CLI, 5 scenarios, 18 tests |
 | MVP-1 | ✓ Complete | LLM intent parser (OpenAI-compatible) + FastAPI app |
-| MVP-2 | ✓ Complete | Streamlit UI, dual backend mode, 43/43 tests in <1 s |
-| MVP-3 | ✓ Complete | Alternative plans selector, source tracking, UI polish, 91 tests |
-| v1 | Planned | Optional SQLite persistence |
+| MVP-2 | ✓ Complete | Streamlit UI, dual backend mode |
+| MVP-3 | ✓ Complete | Alternative plans selector, source tracking, UI polish |
+| MVP-4 | ✓ Complete | meal_policy, revision, opening-hours gate, 321 tests |
 
 ---
 
