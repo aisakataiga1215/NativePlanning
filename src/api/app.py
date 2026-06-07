@@ -13,6 +13,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(_PROJECT_ROOT) not in sys.path:
@@ -37,6 +38,13 @@ from src.workflow.revision_parser import apply_revision
 load_dotenv(_PROJECT_ROOT / ".env")
 
 app = FastAPI(title="NativePlanning API", version="0.1.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 def _serialize_output(output: Any) -> Any:
