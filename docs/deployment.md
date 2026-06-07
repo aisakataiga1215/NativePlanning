@@ -33,7 +33,7 @@
    ```toml
    OPENAI_API_KEY = "sk-..."
    OPENAI_BASE_URL = "https://api.deepseek.com/"   # 可选
-   OPENAI_MODEL = "deepseek-chat"                     # 可选
+   OPENAI_MODEL = "deepseek-v4-flash"                     # 可选
    ```
 
    **不配置 Secrets 也能完整运行**：系统自动降级为 rule-based 意图解析 + MockAPI，所有 8 条验收用例均可通过。
@@ -100,3 +100,12 @@ uvicorn src.api.app:app --reload --port 8000
 - 不需要提交 `.env` 文件；本地路径（`E:/`、`C:/`）不会出现在代码或配置中。
 - `requirements.txt` 中所有依赖均可通过 PyPI 安装，无私有包。
 - 无 API Key 时系统自动降级为 rule-based 模式，功能完整。
+
+---
+
+## Known Limitations
+
+- 使用 mock 数据演示，未连接真实美团 / 高德 API
+- 距离、排队时长、座位数为模拟值
+- 无真实支付；预订结果为 mock booking ID
+- 单 session，无用户登录和历史偏好记忆

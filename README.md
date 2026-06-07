@@ -86,6 +86,21 @@ See [`docs/demo_script.md`](docs/demo_script.md) for the full judge demo walkthr
 
 ---
 
+## Recommended Inputs
+
+```
+今天晚上带孩子去亲子乐园
+待会和老婆去吃烛光晚餐
+明天去动物园，不吃饭
+今晚和朋友吃火锅
+明天早上7点带孩子去动物园
+明天和老婆去看展，然后吃日料
+```
+
+After generating a plan, try revision inputs: `太远了` / `换个餐厅` / `不吃饭`
+
+---
+
 ## Tests
 
 ```bash
@@ -138,6 +153,24 @@ src/
 ├── ui/           # Streamlit app + PlanningClient
 └── workflow/     # intent_parser, planner, constraint_solver,
                   # executor, message_agent
-tests/            # 91 tests, no external API calls
-docs/             # architecture, changelog, demo_script, project_status
+tests/            # 321 tests, no external API calls
+docs/             # architecture, changelog, design_proposal, judge_guide
 ```
+
+---
+
+## Known Limitations
+
+- Mock data only — not connected to real Meituan / Amap API
+- Distance, queue time, and seat counts are simulated values
+- No real payment; booking returns a mock booking ID
+- Single session — no user login or persistent history
+
+---
+
+## Design & Judge Docs
+
+- [Design Proposal](docs/design_proposal.md) — architecture, intent parsing, tool chain, exception handling
+- [Judge Guide](docs/judge_guide.md) — 8 acceptance cases, recommended inputs, UI walkthrough
+- [Deployment Guide](docs/deployment.md) — Streamlit Cloud / HF Spaces deployment steps
+- [Meituan Alignment](docs/meituan_alignment.md) — GENE alignment and evaluation metrics

@@ -2,6 +2,27 @@
 
 All meaningful project changes should be recorded in this file.
 
+## [Final Submission] — 2026-06-07
+
+### Added
+
+- `requirements.txt`: flat dependency file for Streamlit Cloud deployment
+- `.streamlit/config.toml`: Meituan orange theme + headless server config
+- `docs/deployment.md`: Streamlit Community Cloud + HF Spaces deployment guide
+- `docs/judge_guide.md`: judge walkthrough with 8 acceptance cases, recommended inputs, revision guide
+- `docs/design_proposal.md`: 12-section formal design proposal (intent parsing table, plan generation table, tool call chain, exception handling table, feature modules, Meituan alignment, evaluation metrics)
+- `docs/final_submission_checklist.md`: pre-submission verification checklist
+- Public deployment: https://nativeplanning.streamlit.app/
+
+### Changed
+
+- `README.md`: added recommended inputs, known limitations, design doc links; test count updated to 321
+- `docs/demo_script.md`: removed all local absolute paths (`E:\`)
+- `.gitignore`: added `.env.*` and `.streamlit/secrets.toml`
+- `.streamlit/config.toml`: added `enableXsrfProtection=false`, `gatherUsageStats=false`
+
+---
+
 ## [MVP-4.6] - 2026-06-03 (Bugfix & Data Consistency Pass)
 
 ### Fixed

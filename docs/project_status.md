@@ -2,11 +2,10 @@
 
 ## 1. Current Phase
 
-Current phase: **MVP-4.6 Complete**
+Current phase: **Final Submission / Deployment Ready**
 
-MVP-4.6 fixed 7 of 9 consistency bugs (A, B, C, D, F, G, I) exposed in MVP-4.5 testing. Bugs E (budget preference UI diff) and H (local_life_catalog.md) remain deferred.
-
-Next milestone: **MVP-5** (TBD).
+Deployed at: https://nativeplanning.streamlit.app/
+GitHub: https://github.com/aisakataiga1215/NativePlanning
 
 ## 2. Milestones
 
@@ -152,13 +151,24 @@ Tasks:
 - Save plan sessions
 - User preference memory
 
-## 3. Current Progress
+## 3. Current State
 
-MVP-0 through MVP-4.5 complete. All 216 tests passing (1 skipped). All 5 CLI fixture scenarios produce valid plans. Both in-process and HTTP backend modes verified. Plan revision loop with scope dispatch tested end-to-end in Streamlit.
+- **321 tests passing**, 0 failed (no external API calls required)
+- Deployed: https://nativeplanning.streamlit.app/
+- 8 demo acceptance cases verified end-to-end
+- Both in-process and HTTP backend modes functional
+- Rule-based fallback confirmed working without `OPENAI_API_KEY`
 
-Documentation: `docs/data_simulation.md` (mock data strategy), `docs/handoff_mvp4.md` (MVP-3.5/4 design decisions), `docs/changelog.md` (full change history).
+## 4. Known Limitations
 
-## 4. Next Steps
+- Mock data only — not connected to real Meituan / Amap API
+- Distance, queue time, and seat counts are simulated values
+- No real payment; booking returns a mock booking ID
+- Single session — no user login or persistent history
 
-1. **MVP-4.6 Bugfix Pass**: Follow Phase 1–9 in `docs/handoff_mvp46_bugfix.md`. Start new Claude Code session with the prompt at the end of that document.
-2. MVP-5 (TBD): Real API integration, SQLite persistence, or additional planning scenarios.
+## 5. Next Steps (Post-Submission)
+
+- Real API integration (Meituan / Amap / queue / coupon)
+- Next.js + TypeScript frontend (Vercel)
+- SQLite persistence + user history
+- Multi-city expansion
