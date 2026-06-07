@@ -133,48 +133,109 @@ def _render_header() -> None:
         )
 
 
+_PLAN_MODE_LABEL: dict[str, str] = {
+    "activity_first": "活动优先", "meal_first": "餐饮优先", "meal_only": "仅餐饮",
+}
+_SCENARIO_LABEL: dict[str, str] = {
+    "family": "家庭", "couple": "情侣", "friends": "朋友",
+    "solo": "独行", "colleagues": "同事", "unknown": "—",
+}
+_MEAL_POLICY_LABEL: dict[str, str] = {
+    "required": "需要餐饮", "optional": "按需安排", "excluded": "不安排餐饮",
+}
+_BUDGET_LABEL: dict[str, str] = {"low": "省钱", "medium": "适中", "high": "不限"}
+_TIME_PERIOD_LABEL: dict[str, str] = {
+    "morning": "上午", "noon": "中午", "afternoon": "下午",
+    "evening": "傍晚", "night": "晚上", "soon": "待会", "unknown": "",
+}
+
+
+def _gene_row(label: str, value: str) -> None:
+    st.markdown(f"**{label}**  {value or '—'}")
+
+
+def _fmt_participants(intent) -> str:
+    n = intent.group_size
+    parts = getattr(intent, "participants", None) or []
+    if not parts:
+        return f"{n}人"
+    from collections import Counter
+    cnt = Counter(getattr(p, "age_group", "") for p in parts)
+    chips = " ".join(f"{v}{k}" for k, v in cnt.items() if k)
+    return f"{n}人 · {chips}" if chips else f"{n}人"
+
+
+def _fmt_time(intent) -> str:
+    date = "今天" if intent.date == "today" else intent.date
+    weekday = getattr(intent, "weekday", None) or ""
+    period = _TIME_PERIOD_LABEL.get(getattr(intent, "time_period", ""), "")
+    parts = [p for p in [date, weekday, period] if p]
+    return " ".join(parts) + f" · {intent.time}出发 · {intent.duration_hours}h"
+
+
+def _fmt_concrete(intent) -> str:
+    items = (
+        (getattr(intent, "requested_activities", None) or [])
+        + (getattr(intent, "activity_preferences", None) or [])
+        + (getattr(intent, "requested_places", None) or [])
+    )
+    return " · ".join(items[:5]) if items else "—"
+
+
+def _fmt_meal(intent) -> str:
+    policy = _MEAL_POLICY_LABEL.get(getattr(intent, "meal_policy", "required"), "")
+    meals = (getattr(intent, "requested_meals", None) or []) + (
+        getattr(intent, "meal_preferences", None) or []
+    )
+    return policy + (f" · {' / '.join(meals[:3])}" if meals else "")
+
+
+def _fmt_hard(intent) -> str:
+    hc = getattr(intent, "hard_constraints", None) or []
+    av = len(getattr(intent, "avoid_venue_ids", None) or [])
+    ar = len(getattr(intent, "avoid_restaurant_ids", None) or [])
+    parts = list(hc[:3])
+    if av:
+        parts.append(f"避开{av}场馆")
+    if ar:
+        parts.append(f"避开{ar}餐厅")
+    return " · ".join(parts) if parts else "—"
+
+
+def _fmt_soft(intent) -> str:
+    sp = getattr(intent, "soft_preferences", None) or []
+    budget = _BUDGET_LABEL.get(getattr(intent, "budget_preference", "medium"), "")
+    parts = list(sp[:3])
+    if budget:
+        parts.append(f"{budget}预算")
+    return " · ".join(parts) if parts else budget or "—"
+
+
 def _render_intent_panel(generate: GenerateResponse) -> None:
     intent = generate.intent
     source_lbl = _source_label(intent.source)
-
-    _BUDGET_LABEL = {"low": "省钱", "medium": "适中", "high": "不限"}
-    _TIME_PERIOD_LABEL = {
-        "morning": "上午", "noon": "中午", "afternoon": "下午",
-        "evening": "傍晚", "night": "晚上", "soon": "待会", "unknown": "",
-    }
-
     with st.container(border=True):
-        st.markdown(f"### 1. 意图解析  `{source_lbl}`")
-        cols = st.columns(4)
-        cols[0].metric("场景", intent.scenario_type)
-        cols[1].metric("人数", intent.group_size)
-        cols[2].metric("时长", f"{intent.duration_hours} h")
-        cols[3].metric("最远距离", f"{intent.max_distance_km} km")
-
-        period_str = _TIME_PERIOD_LABEL.get(intent.time_period, "")
-        date_line = f"{intent.date}"
-        if intent.weekday:
-            date_line += f"  {intent.weekday}"
-        if period_str:
-            date_line += f" · {period_str}"
-        date_line += f"  出发 {intent.time}"
-        st.markdown(f"📅 {date_line}")
-
-        budget_lbl = _BUDGET_LABEL.get(intent.budget_preference, intent.budget_preference)
-        st.markdown(f"💰 预算偏好：**{budget_lbl}**")
-
-        _MEAL_POLICY_LABEL = {
-            "excluded": "不安排餐饮",
-            "optional": "有合适再安排",
-            "required": "按需安排",
-        }
-        meal_pol = getattr(intent, "meal_policy", "required")
-        st.markdown(f"🍽 餐饮：**{_MEAL_POLICY_LABEL.get(meal_pol, meal_pol)}**")
-
-        if intent.location_anchor:
-            st.markdown(f"📍 **位置锚点：** {intent.location_anchor}")
+        st.markdown(f"### 1. 需求理解  `{source_lbl}`")
         if intent.raw_input:
             st.caption(f"原始输入：{intent.raw_input}")
+        left, right = st.columns(2)
+        with left:
+            _gene_row(
+                "场景需求",
+                f"{_SCENARIO_LABEL.get(intent.scenario_type, '—')} · "
+                f"{_PLAN_MODE_LABEL.get(getattr(intent, 'plan_mode', ''), '—')}",
+            )
+            _gene_row("人物要素", _fmt_participants(intent))
+            _gene_row("时间要素", _fmt_time(intent))
+            _gene_row(
+                "空间要素",
+                f"{intent.location_anchor or '当前位置'} ≤{intent.max_distance_km}km",
+            )
+        with right:
+            _gene_row("具象需求", _fmt_concrete(intent))
+            _gene_row("餐饮策略", _fmt_meal(intent))
+            _gene_row("硬约束", _fmt_hard(intent))
+            _gene_row("软偏好", _fmt_soft(intent))
 
 
 def _render_warnings(warnings: list[str]) -> None:
@@ -391,6 +452,74 @@ def _render_trace_expander(traces: list[dict]) -> None:
         st.dataframe(rows, hide_index=True, use_container_width=True)
 
 
+_SEARCH_TOOLS = {
+    "search_venues", "search_venues_fallback", "search_restaurants",
+    "search_restaurants_meal_only", "search_venues_tooFar_wide",
+    "search_venues_evening_wide", "search_restaurants_cuisine_wider",
+}
+_CHECK_TOOLS = {
+    "check_venue_availability", "check_restaurant_availability",
+    "search_venues_alt", "search_restaurants_alt_base",
+}
+
+
+def _count_results(output) -> int:
+    if isinstance(output, list):
+        return len(output)
+    if isinstance(output, dict):
+        for key in ("count", "results", "items"):
+            v = output.get(key)
+            if isinstance(v, list):
+                return len(v)
+            if isinstance(v, int):
+                return v
+    return 0
+
+
+def _render_planning_chain(traces: list[dict], intent, plan) -> None:
+    with st.container(border=True):
+        st.markdown("#### 规划链路摘要")
+        rows = []
+
+        src_lbl = "LLM" if getattr(intent, "source", "") == "llm" else "规则"
+        scenario = _SCENARIO_LABEL.get(intent.scenario_type, intent.scenario_type)
+        rows.append({"阶段": "需求理解", "状态": "✅",
+                     "摘要": f"{scenario} {intent.group_size}人 · {src_lbl}"})
+
+        search_ts = [t for t in traces if t.get("tool_name") in _SEARCH_TOOLS]
+        venue_cnt = sum(
+            _count_results(t.get("output"))
+            for t in search_ts if "venue" in t.get("tool_name", "")
+        )
+        rest_cnt = sum(
+            _count_results(t.get("output"))
+            for t in search_ts if "restaurant" in t.get("tool_name", "")
+        )
+        ms_s = sum(t.get("elapsed_ms", 0) for t in search_ts)
+        rows.append({"阶段": "候选召回", "状态": "✅" if search_ts else "—",
+                     "摘要": f"{venue_cnt}家场馆  {rest_cnt}家餐厅  ({ms_s:.0f}ms)"})
+
+        check_ts = [t for t in traces if t.get("tool_name") in _CHECK_TOOLS]
+        adjusted = any("alt" in t.get("tool_name", "") for t in check_ts)
+        ms_c = sum(t.get("elapsed_ms", 0) for t in check_ts)
+        status_c = "⚠" if adjusted else ("✅" if check_ts else "—")
+        note_c = "有调整" if adjusted else ("通过" if check_ts else "跳过")
+        rows.append({"阶段": "可行性过滤", "状态": status_c,
+                     "摘要": f"{note_c}  ({ms_c:.0f}ms)"})
+
+        sb = plan.score_breakdown
+        rows.append({"阶段": "多维排序", "状态": "✅",
+                     "摘要": (
+                         f"综合{plan.score:.2f}  距离{sb.distance_score:.2f}  "
+                         f"适配{sb.group_fit_score:.2f}  餐厅{sb.restaurant_score:.2f}"
+                     )})
+
+        rows.append({"阶段": "生成执行计划", "状态": "✅",
+                     "摘要": f"{plan.title}  ·  {plan.stop_count}站"})
+
+        st.dataframe(rows, hide_index=True, use_container_width=True)
+
+
 def _build_exec_detail(result, plan, intent) -> str:
     import src.mock_api as mock
     ref = result.booking_id or result.order_id or ""
@@ -548,6 +677,7 @@ def main() -> None:
 
     _render_plan_card(selected_plan, group_size=generate.intent.group_size)
     _render_timeline(selected_plan)
+    _render_planning_chain(generate.traces, generate.intent, selected_plan)
     _render_trace_expander(generate.traces)
 
     # Revision UI — only shown before execution

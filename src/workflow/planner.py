@@ -223,7 +223,7 @@ def _generate_meal_only_plans(intent: UserIntent, log: TraceLog) -> list[Itinera
                 distance_score=0.0, time_score=0.0,
                 group_fit_score=0.0, restaurant_score=0.0, execution_score=0.0,
             ),
-            reasons=[f"{r.name} 评分 {r.rating}，适合{_group_label(intent.scenario_type)}"],
+            reasons=_build_meal_only_reasons(r),
             risks=[f"排队约 {r.queue_minutes} 分钟"] if r.queue_minutes >= 20 else [],
             required_actions=(["reserve_restaurant"] if r.reservation_available else []),
             venue_id="",
@@ -616,9 +616,7 @@ def _build_one_plan(
             plan_title = primary_venue.name
             plan_summary = f"{intent.time} 出发，全天游览 {primary_venue.name}"
 
-        reasons = [
-            f"{primary_venue.name} 评分 {primary_venue.rating}，适合{_group_label(intent.scenario_type)}"
-        ]
+        reasons = _build_venue_reasons(primary_venue)
         if meal_policy == "excluded":
             reasons.append("已按要求不安排餐饮")
         non_travel = [s for s in steps if s.step_type not in ("travel", "return")]
@@ -706,7 +704,7 @@ def _build_one_plan(
         plan_title = venue_names
         plan_summary = f"{intent.time} 出发，前往 {venue_names}"
 
-    reasons = [f"{primary_venue.name} 评分 {primary_venue.rating}，适合{_group_label(intent.scenario_type)}"]
+    reasons = _build_venue_reasons(primary_venue, restaurant=primary_restaurant)
     risks: list[str] = []
     if primary_restaurant and primary_restaurant.queue_minutes >= 30:
         risks.append(f"{primary_restaurant.name} 排队约 {primary_restaurant.queue_minutes} 分钟，建议提前预约")
@@ -1140,6 +1138,53 @@ def _group_label(scenario_type: str) -> str:
         "family": "家庭出行", "friends": "朋友聚会",
         "couple": "情侣出行", "colleagues": "团队出行", "solo": "独自出行",
     }.get(scenario_type, "出行")
+
+
+def _build_venue_reasons(venue, restaurant=None) -> list[str]:
+    reasons = []
+    rating = getattr(venue, "rating", 0)
+    review_count = getattr(venue, "review_count", 0)
+    reasons.append(f"⭐ {venue.name} {rating}分 ({review_count}评)")
+    dist = getattr(venue, "distance_km", None)
+    open_t = getattr(venue, "open_time", "")
+    close_t = getattr(venue, "close_time", "")
+    if dist is not None:
+        reasons.append(f"📍 距离 {dist:.1f}km · 营业 {open_t}–{close_t}")
+    queue = getattr(venue, "queue_minutes", 0)
+    if queue > 0:
+        reasons.append(f"⏳ 预计排队 {queue} 分钟，建议提前")
+    pos_tags = getattr(venue, "positive_review_tags", None) or []
+    if pos_tags:
+        reasons.append("👍 " + " · ".join(pos_tags[:3]))
+    if restaurant:
+        r_rating = getattr(restaurant, "rating", 0)
+        r_price = getattr(restaurant, "avg_price_per_person", 0)
+        reasons.append(f"🍽 {restaurant.name} ⭐{r_rating} 人均¥{r_price:.0f}")
+        r_tags = getattr(restaurant, "positive_review_tags", None) or []
+        if r_tags:
+            reasons.append("👍 餐厅：" + " · ".join(r_tags[:2]))
+    return reasons[:7]
+
+
+def _build_meal_only_reasons(restaurant) -> list[str]:
+    reasons = []
+    rating = getattr(restaurant, "rating", 0)
+    review_count = getattr(restaurant, "review_count", 0)
+    reasons.append(f"⭐ {restaurant.name} {rating}分 ({review_count}评)")
+    price = getattr(restaurant, "avg_price_per_person", 0)
+    open_t = getattr(restaurant, "open_time", "")
+    close_t = getattr(restaurant, "close_time", "")
+    reasons.append(f"💰 人均约 ¥{price:.0f} · 营业 {open_t}–{close_t}")
+    queue = getattr(restaurant, "queue_minutes", 0)
+    if queue > 0:
+        reasons.append(f"⏳ 排队约 {queue} 分钟")
+    pos_tags = getattr(restaurant, "positive_review_tags", None) or []
+    if pos_tags:
+        reasons.append("👍 " + " · ".join(pos_tags[:3]))
+    dishes = getattr(restaurant, "recommended_dishes", None) or []
+    if dishes:
+        reasons.append("🥢 推荐：" + " · ".join(dishes[:2]))
+    return reasons[:7]
 
 
 def _required_actions(venue, restaurant) -> list[str]:
