@@ -1,3 +1,12 @@
+---
+title: NativePlanning
+emoji: 🗺️
+colorFrom: orange
+colorTo: red
+sdk: docker
+pinned: false
+---
+
 # NativePlanning — Local Activity Planning Agent
 
 [![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://nativeplanning.streamlit.app/)
