@@ -105,24 +105,31 @@ User
 | **Execution Agent** | 执行预订操作（订票/预约/下单），处理失败并 fallback，返回 booking ID 和下一步提醒 |
 | **Explainability Layer** | `ToolTrace` 记录完整工具调用链；方案卡片展示推荐理由、评分维度、feasibility 状态和 warning |
 | **Mock Local-Life Tool Layer** | 模拟场馆搜索、餐厅搜索、营业时间查询、票种/座位/排队、预订/预约接口；接口契约与真实 API 对齐，**可替换为真实商户/地图/排队/券包/预订 API** |
-| **Streamlit Demo UI** | 意图解析面板（[LLM]/[rule-based] 徽章）、多方案选择器、评分卡片、时间轴、工具追踪、两步确认执行、分享文案生成 |
+| **Streamlit Demo UI** | 意图解析面板（[LLM]/[rule-based] 徽章）、多方案选择器、评分卡片、时间轴、工具追踪、两步确认执行、分享文案生成（`main` 分支） |
+| **TypeScript / Next.js 14 前端** | App Router SPA；状态机（idle → generating → plan_ready → revising → executing → done）；8 个组件（IntentPanel / PlanCard / PlanSelector / Timeline / ToolTrace / ExecutionResult / ShareMessage / RevisionInput）；部署于 Vercel（`https://native-planning.vercel.app`） |
 
 ---
 
 ## 7. 技术架构
 
 ```
-Frontend:   Streamlit (当前提交版)
-Backend:    FastAPI + Pydantic v2 schemas
+Frontend:   Next.js 14 + TypeScript（主前端，Vercel 部署）
+            Streamlit（备用演示 UI，main 分支）
+Backend:    FastAPI + Pydantic v2 schemas（HuggingFace Spaces 部署）
 Workflow:   Python planning pipeline (src/workflow/)
 Tool Layer: In-memory MockAPI (src/mock_api/) — 可替换真实 API
 LLM:        OpenAI-compatible（DeepSeek 等国内 API）
 Testing:    pytest，321 tests，无外部 API 调用
 ```
 
+**部署地址：**
+- 前端（Next.js）：`https://native-planning.vercel.app`
+- 前端（Streamlit）：`https://nativeplanning.streamlit.app`
+- 后端：`https://aisakamai-nativeplanning.hf.space`
+
 **双后端模式：**
-- In-process 模式（默认）：Streamlit 直接调用 Python 规划链
-- HTTP 模式：FastAPI 独立部署，`NATIVE_PLANNING_API_URL` 指向后端
+- In-process 模式（Streamlit 默认）：直接调用 Python 规划链
+- HTTP 模式：FastAPI 独立部署，Next.js 前端通过 `/api/:path*` 代理请求
 
 ---
 
@@ -190,7 +197,6 @@ Testing:    pytest，321 tests，无外部 API 调用
 ## 12. 后续迭代
 
 - 接入真实地图/商户/排队/券包/预订 API（mock tool layer 已预留接口契约）
-- Next.js + TypeScript 正式前端（Vercel 部署）
 - 用户历史偏好与长期记忆
 - 多城市扩展
 - 在线 badcase 收敛与评测
