@@ -11,7 +11,10 @@ pinned: false
 
 [![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://nativeplanning.streamlit.app/)
 
-**Live Demo: https://nativeplanning.streamlit.app/**
+**Live Demo:**
+- Next.js 前端：https://native-planning.vercel.app
+- Streamlit UI：https://nativeplanning.streamlit.app
+- FastAPI 后端：https://aisakamai-nativeplanning.hf.space/api/health
 
 A local-life planning and execution agent that turns one natural language request into a
 complete, confirmed, executable 4–6 hour activity plan.
@@ -26,72 +29,41 @@ confirmation.
 
 ## Quick Start
 
+### Next.js 前端（推荐）
+
 ```bash
-# 1. Install dependencies
-pip install -r requirements.txt && pip install -e .
-# or with extras:
-pip install -e ".[api,ui]"        # FastAPI + Streamlit
-pip install -e ".[dev]"           # tests only
+# Terminal 1 — FastAPI backend
+pip install -r requirements.txt
+cp .env.example .env   # fill in OPENAI_API_KEY
+uvicorn src.api.app:app --port 8000
 
-# 2. (Optional) Configure LLM — any OpenAI-compatible provider
-cp .env.example .env
-# Set OPENAI_API_KEY, OPENAI_BASE_URL (DeepSeek), OPENAI_MODEL
-# Without a key the system falls back to rule-based intent parsing automatically
+# Terminal 2 — Next.js frontend
+cd frontend
+npm install
+npm run dev
+# → http://localhost:3000
+```
 
-# 3. Start Streamlit UI
+### Streamlit UI
+
+```bash
+pip install -r requirements.txt
+cp .env.example .env   # fill in OPENAI_API_KEY
 streamlit run src/ui/app.py
 # → http://localhost:8501
 ```
 
----
-
-## CLI Demo (no extra deps)
+### CLI Demo (no extra deps)
 
 ```bash
-python -m src.cli.main family              # family scenario
-python -m src.cli.main friends             # friends scenario
-python -m src.cli.main failure-no-seats    # restaurant unavailable → auto-repair
-python -m src.cli.main failure-no-tickets  # venue tickets sold out → auto-repair
-python -m src.cli.main failure-time-conflict  # time crunch → plan compressed
-```
-
-Free-text input (requires `OPENAI_API_KEY`):
-```bash
+python -m src.cli.main family
+python -m src.cli.main friends
+python -m src.cli.main failure-no-seats
+python -m src.cli.main failure-no-tickets
+python -m src.cli.main failure-time-conflict
+# free-text (requires OPENAI_API_KEY):
 python -m src.cli.main 今天下午想和三个朋友出去玩，拍拍照吃个好的
 ```
-
----
-
-## Streamlit UI
-
-> Full judge walkthrough: **[docs/demo_script.md](docs/demo_script.md)**
-
-**In-process mode (default):**
-```bash
-streamlit run src/ui/app.py
-# → http://localhost:8501
-```
-
-**HTTP mode (FastAPI backend):**
-```bash
-# Terminal 1
-uvicorn src.api.app:app --reload --port 8000
-
-# Terminal 2 — Windows
-set NATIVE_PLANNING_API_URL=http://localhost:8000
-streamlit run src/ui/app.py
-
-# Terminal 2 — macOS / Linux
-export NATIVE_PLANNING_API_URL=http://localhost:8000
-streamlit run src/ui/app.py
-```
-
-The UI shows intent panel (with `[LLM]` / `[rule-based]` source badge), plan card
-(5-dim score), alternative plan selector (up to 3 candidates), timeline, collapsible
-tool traces, two-step confirm flow, execution results with booking IDs, copy-ready
-share message, and a 🔄 reset button.
-
-See [`docs/demo_script.md`](docs/demo_script.md) for the full judge demo walkthrough.
 
 ---
 
@@ -106,7 +78,7 @@ See [`docs/demo_script.md`](docs/demo_script.md) for the full judge demo walkthr
 明天和老婆去看展，然后吃日料
 ```
 
-After generating a plan, try revision inputs: `太远了` / `换个餐厅` / `不吃饭`
+After generating a plan, try: `太远了` / `换个餐厅` / `不吃饭`
 
 ---
 
@@ -129,10 +101,9 @@ User Input
                  └─ Message Agent (LLM → template fallback)
 
 MockAPI  ←  Tool Wrappers (ToolTrace / TraceLog)
-FastAPI  ←  InProcessClient / HttpClient  ← Streamlit UI
+FastAPI  ←  Next.js (Vercel) / Streamlit UI
 ```
 
-Runtime code lives in `src/workflow/` and `src/tools/`.
 See [`docs/architecture.md`](docs/architecture.md) for details.
 
 ---
@@ -146,24 +117,48 @@ See [`docs/architecture.md`](docs/architecture.md) for details.
 | MVP-2 | ✓ Complete | Streamlit UI, dual backend mode |
 | MVP-3 | ✓ Complete | Alternative plans selector, source tracking, UI polish |
 | MVP-4 | ✓ Complete | meal_policy, revision, opening-hours gate, 321 tests |
+| MVP-5 | ✓ Complete | TypeScript Next.js 14 frontend + production deployment |
 
 ---
 
 ## Project Structure
 
 ```
+frontend/                      # Next.js 14 App Router SPA (Vercel)
+├── app/page.tsx               # 主页面 — 6 阶段状态机
+├── components/                # UI 组件
+│   ├── IntentPanel.tsx        # 意图解析结果
+│   ├── PlanCard.tsx           # 方案卡片（5 维评分）
+│   ├── PlanSelector.tsx       # 备选方案切换
+│   ├── Timeline.tsx           # 行程时间轴
+│   ├── ToolTrace.tsx          # 工具调用链（可折叠）
+│   ├── ExecutionResult.tsx    # 预订结果
+│   ├── ShareMessage.tsx       # 分享文案 + 一键复制
+│   └── RevisionInput.tsx      # 修改意见输入
+└── lib/
+    ├── api.ts                 # fetch 客户端（generate / revise / execute）
+    └── types.ts               # TypeScript 接口（镜像 Pydantic schemas）
+
 src/
-├── api/          # FastAPI app + HTTP schemas
-├── cli/          # CLI entry point
-├── mock_api/     # In-memory MockAPI (venues, restaurants, coupons)
-├── schemas/      # Pydantic v2 domain schemas
-├── services/     # plan_ranker, itinerary_builder
-├── tools/        # Tool wrappers + TraceLog
-├── ui/           # Streamlit app + PlanningClient
-└── workflow/     # intent_parser, planner, constraint_solver,
-                  # executor, message_agent
-tests/            # 321 tests, no external API calls
-docs/             # architecture, changelog, design_proposal, judge_guide
+├── api/                       # FastAPI 入口 + HTTP schemas
+├── workflow/                  # 核心规划链
+│   ├── intent_parser.py       # LLM / rule-based 意图解析
+│   ├── planner.py             # 场馆 + 餐厅召回与组合
+│   ├── constraint_solver.py   # 营业时间 / 时间冲突修复
+│   ├── revision_parser.py     # 局部修改（restaurant / venue / distance）
+│   ├── executor.py            # 预订执行
+│   └── message_agent.py       # 分享文案生成
+├── services/
+│   ├── plan_ranker.py         # 5 维评分排序
+│   └── itinerary_builder.py   # 时间轴生成
+├── tools/                     # Tool wrappers + ToolTrace / TraceLog
+├── mock_api/                  # 内存 MockAPI（场馆 18 / 餐厅 16）
+├── schemas/                   # Pydantic v2 领域模型
+├── ui/                        # Streamlit UI（main 分支）
+└── cli/                       # CLI 入口
+
+tests/                         # 321 tests，无需 OPENAI_API_KEY
+docs/                          # 架构文档、changelog、设计方案、评委指南
 ```
 
 ---
@@ -180,6 +175,6 @@ docs/             # architecture, changelog, design_proposal, judge_guide
 ## Design & Judge Docs
 
 - [Design Proposal](docs/design_proposal.md) — architecture, intent parsing, tool chain, exception handling
+- [Design Proposal (PDF)](design_proposal.pdf) — printable version
 - [Judge Guide](docs/judge_guide.md) — 8 acceptance cases, recommended inputs, UI walkthrough
-- [Deployment Guide](docs/deployment.md) — Streamlit Cloud / HF Spaces deployment steps
 - [Meituan Alignment](docs/meituan_alignment.md) — GENE alignment and evaluation metrics
